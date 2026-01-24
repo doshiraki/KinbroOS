@@ -22,7 +22,7 @@ Scan to watch the repository and get notified upon release:
 
 ![KinbroOS Repo QR Code](https://placehold.co/150x150?text=Scan+to+Watch)
 
-[https://github.com/your-username/KinbroOS](https://github.com/doshiraki/KinbroOS)
+[https://github.com/doshiraki/KinbroOS](https://github.com/doshiraki/KinbroOS)
 
 ---
 
