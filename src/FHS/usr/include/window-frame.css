@@ -1,0 +1,64 @@
+/* [私たちの美学: デザイン規約]
+   1. 視認性: Tokyo Nightカラーを基調とした高コントラスト設計。
+   2. 操作性: ドラッグ領域（Header）を明確にし、直感的な操作を促す。
+*/
+
+:host {
+    --bg-color: #1a1b26;
+    --header-color: #24283b;;
+    --border-color: #414868;
+    --accent-color: #7aa2f7;
+    --text-color: #a9b1d6;
+}
+
+.kinbro-window {
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    
+    /* Shadow DOM内での配置用 */
+    position: fixed; /* Shadow Root内でも有効 */
+    /* z-index は Host 側で制御しているのでここでは不要だが、念のため */
+    z-index: 9999;
+}
+
+/* ドラッグ用のヘッダー領域 */
+.window-header {
+    height: 32px;
+    background-color: var(--header-color);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    cursor: grab;
+    user-select: none;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.window-header:active {
+    cursor: grabbing;
+}
+
+.window-title {
+    color: var(--accent-color);
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    flex-grow: 1;
+}
+.window-close {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 20px;
+    padding: 0 8px;
+    line-height: 1;
+    transition: color 0.2s;
+}
+.window-close:hover {
+    color: #f7768e; /* Tokyo Night の赤 */
+}

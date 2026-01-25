@@ -1,0 +1,14 @@
+
+
+/* ターミナル本体のコンテナ */
+.terminal-container {
+    flex-grow: 1;
+    overflow: hidden; /* xterm.jsがはみ出さないように */
+    background-color: var(--bg-color);
+    padding: 4px;
+}
+
+/* xterm.js の内部微調整 */
+.xterm {
+    padding: 8px;
+}
