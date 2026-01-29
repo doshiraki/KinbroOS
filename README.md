@@ -4,6 +4,9 @@
 ![License](https://img.shields.io/badge/license-Apache_2.0-blue.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)
 
+**AI-Native UNIX Environment running inside your Browser.**
+![KinbroOS Demo](https://raw.githubusercontent.com/doshiraki/KinbroOS_demo/main/kinbro.webp)
+
 > **"Give AI a home, not just a chat window."**
 
 **KinbroOS** is a parasitic, UNIX-like operating system that runs entirely within a web browser context.
