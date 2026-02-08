@@ -79,7 +79,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
 
     if (parser.isHelpRequested) {
         await writer.writeString(parser.getHelp() + '\n');
-        writer.releaseLock(); errWriter.releaseLock();
+        writer.close(); errWriter.close();
         return 0;
     }
 
@@ -139,8 +139,8 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
             }
         }
     } finally {
-        writer.releaseLock();
-        errWriter.releaseLock();
+        writer.close();
+        errWriter.close();
     }
 
     return exitCode;
