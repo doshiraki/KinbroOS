@@ -498,7 +498,7 @@ export class Kibsh implements IShell {
 
     private async cmdEcho(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
         const writer = proc.stdout!.getStringWriter();
-        await writer.write(args.join(' ') + '\r\n');
+        await writer.write(args.map((x)=>x.replace("\r", "\\r").replace("\n","\\n")).join(' ') + '\n');
         await writer.close();
         return 0;
     }

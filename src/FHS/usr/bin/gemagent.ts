@@ -57,7 +57,6 @@ $ command 1
 $ command 2
 $ . /topath/file.sh
 \`\`\`
-※ パイプが使えないので、sort等は単独で使ってください。
 ※ . のソースコマンドはgemagentがファイルを読み込んで展開する。
 ※ kibshの再帰呼出しは未サポート。
 ※ ツール一式は/usr/binにおいてある。
