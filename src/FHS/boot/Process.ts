@@ -20,7 +20,7 @@
  * Promise制御（wait/kill）と Web Streams（stdin/out/err）を統合する。
  */
 import { IEnvManager } from '@/dev/types/IEnvManager';
-import { SignalError } from '../../dev/types/IProcess';
+import { SignalError, IResource } from '../../dev/types/IProcess';
 import type { IProcess, IStdinStream, IStdoutStream, StreamDataType} from '../../dev/types/IProcess';
 import { ProcessState } from '../../dev/types/IProcess';
 import { StdinStream, StdoutStream } from './StdIO';
@@ -57,8 +57,9 @@ export class Process implements IProcess {
     private fnResolve!: (code: number) => void;
     private fnReject!: (reason: any) => void;
 
-    // 🌟 1. 後片付けリスト
+    // 🌟 2. 閉店作業リスト (同期フック + 非同期リソース)
     private readonly listCleanupHooks: (() => void)[] = [];
+    private readonly listResources: IResource[] = [];
 
     /**
      * @param streams 親から継承、または新規作成されたストリーム
@@ -118,6 +119,14 @@ export class Process implements IProcess {
     }
 
     /**
+     * [New] このプロセスが所有するリソース（ファイルストリーム等）を登録する
+     * ここに登録されたものは、exit時に自動的に close() が待機される。
+     */
+    public addResource(res: IResource): void {
+        this.listResources.push(res);
+    }
+
+    /**
      * [Internal] フックの一括実行
      */
     private executeCleanupHooks(): void {
@@ -129,6 +138,26 @@ export class Process implements IProcess {
             }
         }
     }
+
+    /**
+     * [Internal] リソースの解放とFlush待ち (非同期)
+     */
+    private async cleanupAsync(): Promise<void> {
+
+        // 同期フックを先に実行
+        this.executeCleanupHooks();
+
+        // 登録されたリソースを全て閉じる (順次実行で安全に)
+        // これにより FileStream.close() -> flush() が完了するまで待機が発生する
+        for (const res of this.listResources) {
+            try {
+                await res.close();
+            } catch (e) {
+                console.warn(`[Process] Resource close error (PID:${this.pid}):`, e);
+            }
+        }
+    }
+
     /**
      * [Lifecycle: Wait]
      * プロセスが終了するまで待機する (親プロセスやカーネルが呼ぶ)
@@ -144,9 +173,21 @@ export class Process implements IProcess {
      * @param code 終了コード (0=Success, >0=Error)
      */
     public exit(code: number): void {
-        // すでに終了している場合は何もしない等のガードを入れても良い
-        this.executeCleanupHooks(); // 🌟 追加: フック実行
-        this.fnResolve(code);
+        if (this.state === ProcessState.TERMINATED) return;
+        
+        // まずステータスを変える（二重終了防止）
+        this.state = ProcessState.TERMINATED;
+
+        // 🌟 3. 非同期クリーンアップの実行
+        // (Fire-and-forgetではなく、Promiseチェーンの中で解決する)
+        this.cleanupAsync().then(() => {
+            // 全てのFlushが終わって初めて、親プロセス(waitしてる人)に通知が行く
+            this.fnResolve(code);
+        }).catch((err) => {
+            console.error(`[Process] Cleanup failed for PID:${this.pid}`, err);
+            // 失敗しても親を待たせ続けるわけにはいかないので解決する
+            this.fnResolve(code);
+        });
     }
 
     /**
@@ -155,19 +196,25 @@ export class Process implements IProcess {
      * @param signal シグナル番号 (本来は番号だが、JSのエラーとして扱う)
      */
     public kill(signal: number = 9): void {
-        // PromiseをRejectさせて、waitしている親に通知する
-        this.executeCleanupHooks(); // 🌟 追加: フック実行
+        // 強制終了時でも、可能な限りリソース解放を試みる
+        // ただし kill は即時性が求められるため、await せずにバックグラウンドで走らせる手もあるが
+        // ここでは安全側に倒して cleanupAsync を呼んでから resolve する (exitと同じフロー)
+        
+        if (this.state === ProcessState.TERMINATED) return;
+        this.state = ProcessState.TERMINATED;
 
-        // 🌟 I/O待ちで寝ているプロセスを叩き起こす
+        // I/O待ちで寝ているプロセスを叩き起こす
         const reason = new SignalError(signal);
-                
-        // stdin/stdout/stderr 全てに中断シグナルを送る
         this.stdin?.interrupt(reason).catch(() => {});
         this.stdout?.interrupt(reason).catch(() => {});
         this.stderr?.interrupt(reason).catch(() => {});
 
-        // 🌟 2. 変更: 一般的なErrorではなくSignalErrorでRejectする
-        this.fnResolve(128 + signal);
+        this.cleanupAsync().then(() => {
+             // 🌟 2. 変更: 一般的なErrorではなくSignalErrorでRejectする
+            this.fnResolve(128 + signal);
+        }).catch(() => {
+            this.fnResolve(128 + signal);
+        });
     }
 
     public createStdinStream(rsSource: ReadableStream<string> | ReadableStream<Uint8Array>, kindSource: StreamDataType, isTTY: boolean = false ): IStdinStream {
