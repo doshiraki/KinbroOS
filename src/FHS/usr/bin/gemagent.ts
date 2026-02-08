@@ -175,6 +175,7 @@ async function executeCommandsRealtime(commands: string[], sys: SystemAPI, paren
 
         try {
             await shell.executeLogic(cmdExec, nullReader, logWriter);
+            await new Promise(resolve => setTimeout(resolve, 500));
             await writerRaw.close().catch(() => {});
             if (!cmdOutput.endsWith('\n') && cmdOutput.length > 0) {
                 await terminalWriter.write('\n');

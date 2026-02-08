@@ -235,9 +235,19 @@ export class FileSystemManager implements IFileSystem {
             }
             // 生ハンドルを取得
             const rawHandle = await fsPromises.open(pathResolved, flags);
+            let initialCursor = 0;
+            if (flags.includes('a')) {
+                try {
+                    const stat = await rawHandle.stat();
+                    initialCursor = stat.size;
+                } catch (e) {
+                    // 新規作成時などは0のままでOK
+                }
+            }
 
             // FileStreamを生成
             const stream = new FileStream(rawHandle, bufferSize);
+            stream.setWriteCursor(initialCursor);
 
             // bufferSize が undefined なら、FileStream 側のデフォルト(64KB)が使われる
             return stream;
