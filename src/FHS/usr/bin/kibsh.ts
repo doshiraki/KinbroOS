@@ -100,14 +100,10 @@ export class Kibsh implements IShell {
                 for (const objNode of objAst.commands) {
                     // evalNode はプロセスを返すかもしれない
                     const result = await this.evalNode(objNode, reader, writer);
-
                     if (typeof result === 'number') {
                         // 組み込みコマンド (cd等) はそのまま終了コード
                         valLastExitCode = result;
                     } else {
-                        // 🌟 修正: 自分の状態変化を待つのではなく、子プロセスの終了を直接待つ
-                        // これにより、gemagent のような子プロセス内シェルでも確実に次へ進める
-                        await new Promise(resolve => setTimeout(resolve, 2000));
                         await result.wait();
                         
                         // 念のため、自分がサスペンドされていたら自力で起きる
@@ -306,9 +302,16 @@ export class Kibsh implements IShell {
                 
                 // dispatchCommand の結果をそのまま返す
                 const result = await this.dispatchCommand(params.cmd, params.args, reader, params.destWriter, options);
-                // プロセスが正常に起動したなら、ストリームの管理権限はプロセスに移ったので
-                // ここで強制クローズしないようにする
+
+                // 🌟 修正: リソース管理の委譲 (Process-Centric Cleanup)
                 if (typeof result !== 'number') {
+                    // 宛先Writerをプロセスに登録し、プロセス終了時に責任を持って閉じさせる。
+                    // これにより、リダイレクト(ファイル)もパイプも、Writerがclose(flush)されるまで
+                    // 親プロセス(Shell)のwaitが解けないようになる。
+                    // ※ TTY(Shield)の場合も登録して問題ない(Shieldのcloseは何もしないため)
+                    result.addResource(params.destWriter);
+
+                    // シェル側ではもう管理しない（二重クローズ防止のためnull化）
                     params.cleanupAction = null; 
                 }
                 return result;

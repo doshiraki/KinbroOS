@@ -228,7 +228,7 @@ export class FileStream implements IFileStream {
         
         // 🌟 Fix: 第4引数(position)は null 固定。
         // これにより ZenFS の内部カーソル（Appendモードなら末尾）に従って書き込まれる。
-        const { bytesWritten } = await this.hFile.write(bufToFlush, 0, this.idxWriteCursor, null);
+        const { bytesWritten } = await this.hFile.write(bufToFlush, 0, this.idxWriteCursor, this.idxFilePosWrite);
         
         // 参考までに内部カウンタは更新するが、書き込み位置制御には使用しない
         this.idxFilePosWrite += bytesWritten;

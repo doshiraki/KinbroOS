@@ -408,7 +408,7 @@ export class KinbroKernel implements SystemAPI{
         if (!proc) return;
         // 🌟 お掃除ロジックを追加
         // ✨ [Phase 3: 終焉] 削除前に TERMINATED を確定
-        proc.setState(ProcessState.TERMINATED);
+        proc.exit(code);
                 
         const sessionPid = Number(proc.env.get('SESSION_PID') || 0);
         const tty = this.mapSessions.get(sessionPid);
@@ -431,7 +431,6 @@ export class KinbroKernel implements SystemAPI{
             }
         }
 
-        proc.exit(code);
         this.mapProcessTable.delete(pid);
         console.log(`[Kernel:Exit] PID:${pid} (${proc.name}) Code:${code} PGID:${proc.pgid}`);    }
 

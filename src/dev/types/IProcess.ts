@@ -55,6 +55,11 @@ export class SignalError extends Error {
     }
 }
 
+// 🌟 1. 汎用リソースインターフェース
+export interface IResource {
+    close(): Promise<void>;
+}
+
 /**
  * 入力ストリームの抽象インターフェース
  * 実装クラス(StdinStream)への依存を断ち切るために使用。
@@ -151,4 +156,9 @@ export interface IProcess {
 
     addCleanupHook(fn: () => void): void;
 
+    /**
+     * 🌟 [New] このプロセスが所有するリソース（ファイルストリーム等）を登録する
+     * ここに登録されたものは、exit時に自動的に close() が待機される。
+     */
+    addResource(res: IResource): void;
 }
