@@ -42,6 +42,8 @@ export class Kibsh implements IShell {
     
     // index 0 が常に「大元の入力 (TTY/Root)」、末尾が「現在の入力」
     private stackReaders: IBinaryReader[] = [];
+    // 🌟 追加: バッチモード（非対話）フラグ
+    private isInteractive: boolean;
 
     // 🌟 1. State Mutators: シェル自身の状態を変えるため、プロセス化できないコマンド
     private readonly mapShellMutators: Record<string, (args: string[], writer: IBinaryWriter) => Promise<number>> = {
@@ -81,9 +83,15 @@ export class Kibsh implements IShell {
         this.objKernel = objKernel;
         this.proc = proc;
         this.objTransfer = new ZenTransfer(proc.fs);
+        // 🌟 TTY判定: 標準入力がTTYなら対話モード
+        this.isInteractive = proc.stdin?.isTTY ?? false;
 
         try { parse('true'); } catch (e) { console.warn('[Kibsh] Parser warm-up warning:', e); }
-        this.objKernel.setForegroundPgid(this.proc.pid, this.proc.pgid);
+        
+        // 対話モードの時だけ、自分をフォアグラウンドに設定する
+        if (this.isInteractive) {
+            this.objKernel.setForegroundPgid(this.proc.pid, this.proc.pgid);
+        }
     }
 
     /**
@@ -107,7 +115,7 @@ export class Kibsh implements IShell {
                         await result.wait();
                         
                         // 念のため、自分がサスペンドされていたら自力で起きる
-                        if (this.proc.state === ProcessState.SUSPENDED) {
+                        if (this.isInteractive && this.proc.state === ProcessState.SUSPENDED) {
                             this.proc.setState(ProcessState.RUNNING);
                         }
 
@@ -221,9 +229,10 @@ export class Kibsh implements IShell {
         const arrCommands = objNode.commands;
         let currentReader = originalReader; 
         let pipelinePgid: number | undefined;
+        const processes: IProcess[] = [];
 
         // 🌟 プロセス起動直前に Cooked にする
-        if (this.proc.stdin?.isTTY) {
+        if (this.isInteractive && this.proc.stdin?.isTTY) {
             await this.proc.stdin.setMode(TTYMode.Cooked);
         }
         
@@ -231,10 +240,13 @@ export class Kibsh implements IShell {
             const cmdNode = arrCommands[i];
             const isFirst = (i === 0);
             const isLast = (i === arrCommands.length - 1);
+
             const options = {
-                newGroup: isFirst,
-                pgid: isFirst ? undefined : pipelinePgid,
+                newGroup: this.isInteractive ? isFirst : false,
+                pgid: this.isInteractive ? (isFirst ? undefined : pipelinePgid) : this.proc.pgid,
             };
+
+
             let nextWriter: IBinaryWriter;
             let nextReaderForLoop: IBinaryReader | null = null;
 
@@ -250,9 +262,11 @@ export class Kibsh implements IShell {
             // 仮想バイナリ化された内部コマンドも、ここで options を受けて並列実行される
             const result = await this.evalNode(cmdNode, currentReader, nextWriter, options);
 
-            // 🌟 最初のプロセスのPIDをキャプチャして PGID とする
-            if (isFirst && typeof result !== 'number') {
-                pipelinePgid = result.pid;
+            if (typeof result !== 'number') {
+                processes.push(result);
+                if (isFirst && this.isInteractive) {
+                    pipelinePgid = result.pid;
+                }
             }
 
             if (nextReaderForLoop) {
@@ -260,9 +274,19 @@ export class Kibsh implements IShell {
             }
         }
 
-        await this.waitSelfRunning();
-        return 0;
-    }
+        if (processes.length > 0) {
+            await Promise.all(processes.map(p => p.wait()));
+        }
+
+        if (this.isInteractive && this.proc.state === ProcessState.SUSPENDED) {
+            this.proc.setState(ProcessState.RUNNING);
+        }
+        
+        if (this.isInteractive && this.proc.stdin?.isTTY) {
+            await this.proc.stdin.setMode(TTYMode.Raw);
+        }
+
+        return 0;    }
 
     /**
      * 自分のプロセス状態が RUNNING になるまで待機する
@@ -296,12 +320,18 @@ export class Kibsh implements IShell {
         try {
             if (params.cmd !== "") {
                 // 🌟 追加: 単体実行でも Cooked にする
-                if (this.proc.stdin?.isTTY) {
+                if (this.isInteractive && this.proc.stdin?.isTTY) {
                     await this.proc.stdin.setMode(TTYMode.Cooked);
                 }
+
+                // 🌟 修正: options が渡されていない場合（単体コマンド実行）も考慮
+                const effectiveOptions = options || { 
+                    newGroup: this.isInteractive, 
+                    pgid: this.isInteractive ? undefined : this.proc.pgid 
+                };
                 
                 // dispatchCommand の結果をそのまま返す
-                const result = await this.dispatchCommand(params.cmd, params.args, reader, params.destWriter, options);
+                const result = await this.dispatchCommand(params.cmd, params.args, reader, params.destWriter, effectiveOptions);
 
                 // 🌟 修正: リソース管理の委譲 (Process-Centric Cleanup)
                 if (typeof result !== 'number') {

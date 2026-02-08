@@ -147,6 +147,7 @@ export class Process implements IProcess {
         // 同期フックを先に実行
         this.executeCleanupHooks();
 
+        /*
         // 登録されたリソースを全て閉じる (順次実行で安全に)
         // これにより FileStream.close() -> flush() が完了するまで待機が発生する
         for (const res of this.listResources) {
@@ -155,7 +156,7 @@ export class Process implements IProcess {
             } catch (e) {
                 console.warn(`[Process] Resource close error (PID:${this.pid}):`, e);
             }
-        }
+        }*/
     }
 
     /**
