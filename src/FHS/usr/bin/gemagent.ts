@@ -238,8 +238,8 @@ async function interactWithGemini(prompt: string): Promise<string> {
 async function waitForGeminiResponse(): Promise<void> {
     return new Promise((resolve) => {
         const timer = setInterval(() => {
-            const btn = document.querySelector('button[aria-label="プロンプトを送信"]');
-            if (btn && btn.getAttribute('aria-disabled') !== 'true') {
+            const btn = document.querySelector("mat-icon[fonticon='stop']");
+            if (btn == null) {
                 clearInterval(timer);
                 resolve();
             }
