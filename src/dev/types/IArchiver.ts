@@ -14,6 +14,17 @@
  * limitations under the License.
  */
 
+// 🌟 Interface: アーカイブ内のエントリ情報 (構造化)
+export interface ITarEntry {
+    name: string;
+    size: number;
+    type: string;
+    mode: number;
+    uid: number;
+    gid: number;
+    mtime: number; // Unix Timestamp (sec)
+}
+
 // src/dev/types/IArchiver.ts
 export interface IArchiver {
     /** 指定ディレクトリに展開 */
@@ -21,6 +32,9 @@ export interface IArchiver {
     /** 指定パスを .tar.gz ストリームとしてアーカイブ */
     archive(sourcePaths: string[]): ReadableStream<Uint8Array>;
 
-    list(source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>, writer: WritableStreamDefaultWriter<string>): Promise<void> ;
+    list(
+            source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>,
+            onEntry: (entry: ITarEntry) => Promise<void>
+    ): Promise<void>;
 
 }

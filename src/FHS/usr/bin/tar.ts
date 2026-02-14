@@ -17,9 +17,9 @@
 import { SystemAPI } from '../../../dev/types/SystemAPI';
 import { IProcess } from '../../../dev/types/IProcess';
 import { CommandParser } from '../lib/CommandParser';
-import { BinaryReader, BinaryWriter } from '../lib/StreamUtils';
-import { Archiver } from '../../boot/Archiver';
-import { createFileSinkStream, createFileSourceStream } from '../lib/FileStreamAdapter';
+import { BinaryWriter } from '../lib/StreamUtils';
+import { ITarEntry } from '@/dev/types/IArchiver';
+import { createFileSinkStream } from '../lib/FileStreamAdapter';
 
 /**
  * [Command: tar]
@@ -54,7 +54,8 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     const isCreate = parser.has('c', 'create');
     const isExtract = parser.has('x', 'extract');
     const isList = parser.has('t', 'list');
-    
+    const isVerbose = parser.has('v', 'verbose'); // Verboseフラグ取得
+
     if (!isCreate && !isExtract && !isList) {
         const err = new BinaryWriter(proc.stderr!.getByteWriter());
         await err.writeString('tar: Must specify one of -c, -x, -t\n');
@@ -105,7 +106,18 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
                 // [List]
                 if (!proc.stdout) throw new Error('tar: Stdout not available');
                 const writer = proc.stdout.getStringWriter();
-                await archiver.list(rsInput, writer);
+
+                // 🌟 Callback方式に変更
+                await archiver.list(rsInput, async (entry: ITarEntry) => {
+                    if (isVerbose) {
+                        // -tvf: 詳細表示
+                        const strLine = formatLongList(entry);
+                        await writer.write(strLine + '\n');
+                    } else {
+                        // -tf: ファイル名のみ
+                        await writer.write(entry.name + '\n');
+                    }
+                });
             } else {
                 // [Extract]
                 const destDir = (parser.get('directory') as string) || proc.fs.getCWD();
@@ -148,4 +160,49 @@ function streamFromReader(reader: ReadableStreamDefaultReader<Uint8Array>): Read
             reader.releaseLock();
         }
     });
+}
+
+/**
+ * 🌟 Helper: ls -l スタイルのフォーマッタ
+ * "drwxr-xr-x 0/0 0 1970-01-01 09:00 usr/" の形式を生成
+ */
+function formatLongList(entry: ITarEntry): string {
+    const typeChar = entry.type === '5' || entry.name.endsWith('/') ? 'd' : '-';
+    const strPerm = formatMode(entry.mode);
+    
+    // date-fns等が使えない環境を想定してシンプルに実装
+    const date = new Date(entry.mtime * 1000);
+    const strDate = date.getFullYear() + '-' +
+        pad2(date.getMonth() + 1) + '-' +
+        pad2(date.getDate()) + ' ' +
+        pad2(date.getHours()) + ':' +
+        pad2(date.getMinutes());
+
+    // User/Group は tar 内では数値(ID)の場合と名前の場合があるが、
+    // 今回のParser実装では数値(uid/gid)を取得している前提
+    const strOwner = `${entry.uid}/${entry.gid}`;
+    
+    // サイズは右寄せしたいが、一旦シンプルに
+    const strSize = entry.size.toString().padStart(8, ' ');
+
+    return `${typeChar}${strPerm} ${strOwner} ${strSize} ${strDate} ${entry.name}`;
+}
+
+function pad2(n: number): string {
+    return n.toString().padStart(2, '0');
+}
+
+/**
+ * 0o755 -> "rwxr-xr-x" 変換
+ */
+function formatMode(mode: number): string {
+    // 下位9ビットのみ使用
+    const m = mode & 0o777;
+    const chars = ['---', '--x', '-w-', '-wx', 'r--', 'r-x', 'rw-', 'rwx'];
+    
+    const u = chars[(m >> 6) & 7];
+    const g = chars[(m >> 3) & 7];
+    const o = chars[m & 7];
+    
+    return u + g + o;
 }

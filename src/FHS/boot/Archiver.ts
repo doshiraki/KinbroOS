@@ -16,6 +16,19 @@
 
 import { fs } from '@zenfs/core';
 import { IFileSystem } from '@/dev/types/IFileSystem';
+import { IArchiver, ITarEntry } from '@/dev/types/IArchiver';
+
+// 🌟 Enum: ヘッダー内のオフセット位置を定義 (意味の明確化)
+enum TarOffset {
+    Name = 0,
+    Mode = 100,
+    Uid = 108,
+    Gid = 116,
+    Size = 124,
+    MTime = 136,
+    Type = 156,
+    Prefix = 345 // ustar prefix (optional)
+}
 
 /**
  * [Kernel Module: Archiver (GNU/Modern Edition)]
@@ -23,7 +36,7 @@ import { IFileSystem } from '@/dev/types/IFileSystem';
  * GNU LongLink拡張に対応し、100バイトを超える長いパスや
  * マルチバイト文字を含むパスを正しくストリーム処理する。
  */
-export class Archiver {
+export class Archiver implements IArchiver{
     constructor(private fsManager: IFileSystem) {}
 
     /**
@@ -70,16 +83,19 @@ export class Archiver {
     /**
      * 📜 リスト: アーカイブ内のファイル一覧を表示 (展開しない)
      */
-    public async list(source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>, writer: WritableStreamDefaultWriter<string>): Promise<void> {
+    public async list(
+            source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>,
+            onEntry: (entry: ITarEntry) => Promise<void>
+    ): Promise<void> {
         const srcStream = this.normalizeStream(source);
+        // gzipかどうかの判定は本来ヘッダを見るべきだけど、一旦既存ロジックを踏襲
         const gunzipStream = srcStream.pipeThrough(new DecompressionStream('gzip') as any) as ReadableStream<Uint8Array>;
-        console.log("aa");
-        await this.processTarStream(gunzipStream, async (header, buffer) => {
-            // シンプルにファイル名を出力 (ls -l風にするならここで header.size や mtime を使う)
-            console.log(header.name);
-            await writer.write(`${header.name}\n`);
-            await this.pipeToNone(buffer, header.size);
 
+        await this.processTarStream(gunzipStream, async (entry, buffer) => {
+            // コールバックに構造化データを渡す
+            await onEntry(entry);
+            // 本体データは読み飛ばす
+            await this.pipeToNone(buffer, entry.size);
         });
     }
 
@@ -117,67 +133,74 @@ export class Archiver {
 
     private async processTarStream(
         stream: ReadableStream<Uint8Array>,
-        callback: (header: TarHeader, buffer: StreamBuffer) => Promise<void>
+        callback: (entry: ITarEntry, buffer: StreamBuffer) => Promise<void>
     ): Promise<void> {
         const reader = stream.getReader();
         const buffer = new StreamBuffer(reader);
         const dec = new TextDecoder();
 
-        // 🌟 GNU LongLink用の状態保持変数
-        // Type 'L' が来たらここに次回用の名前が入る
+        // GNU LongLink用の状態保持変数
         let strNextLongName: string | null = null;
 
         while (true) {
             const header = await buffer.readExact(512);
             if (!header) break;
 
-            // ファイル名 (一旦取得するが、LongNameがあればそちら優先)
-            let name = dec.decode(header.subarray(0, 100)).replace(/\0/g, '').trim();
+            // 1. Name
+            let name = dec.decode(header.subarray(TarOffset.Name, 100)).replace(/\0/g, '').trim();
             if (!name) break; // End of Tar
 
-            // サイズ (8進数)
-            const sizeStr = dec.decode(header.subarray(124, 136)).trim();
-            const size = parseInt(sizeStr, 8);
+            // 2. Metadata Parsing (Octal)
+            const parseOctal = (offset: number, len: number): number => {
+                const str = dec.decode(header.subarray(offset, offset + len)).trim();
+                return parseInt(str, 8) || 0;
+            };
 
-            // タイプフラグ ( '0':File, '5':Dir, 'L':GNU LongName )
-            const type = String.fromCharCode(header[156]);
+            const cntSize = parseOctal(TarOffset.Size, 12);
+            const unixMTime = parseOctal(TarOffset.MTime, 12);
+            const mode = parseOctal(TarOffset.Mode, 8);
+            const uid = parseOctal(TarOffset.Uid, 8);
+            const gid = parseOctal(TarOffset.Gid, 8);
+            
+            // Type Flag
+            const type = String.fromCharCode(header[TarOffset.Type]);
 
-            // GNU LongLink (Type 'L') の処理
+            // GNU LongLink Processing
             if (type === 'L') {
-                // コンテンツ部分(=本当のファイル名)を読み込む
-                // ファイル名はメモリに乗るサイズなのでreadExactでOK
-                const bufName = await buffer.readExact(size);
+                const bufName = await buffer.readExact(cntSize);
                 if (!bufName) throw new Error("Unexpected EOF in LongLink");
-                
                 strNextLongName = dec.decode(bufName).replace(/\0/g, '');
 
-                // パディング読み飛ばし
-                const padding = (512 - (size % 512)) % 512;
+                const padding = (512 - (cntSize % 512)) % 512;
                 if (padding > 0) await buffer.readExact(padding);
-
-                // ※ ここではファイル作成せず、次のヘッダーループへ進む
                 continue;
             }
 
-            // --- ここから通常のファイル/ディレクトリ処理 ---
-
-            // LongNameがあればそれを使用し、変数をリセット
+            // --- Entry Processing ---
             const finalName = strNextLongName ? strNextLongName : name;
-            strNextLongName = null; // 消費完了
+            strNextLongName = null;
 
-            // パス解決
+            // Remove leading slash for safety
             const cleanName = finalName.startsWith('/') ? finalName.slice(1) : finalName;
 
-            console.log("cleanName"+ cleanName);
-            await callback({name:cleanName, size, type}, buffer);
+            const entry: ITarEntry = {
+                name: cleanName,
+                size: cntSize,
+                type: type,
+                mode: mode,
+                uid: uid,
+                gid: gid,
+                mtime: unixMTime
+            };
 
-            // パディング読み飛ばし (ファイル本体のパディング)
-            const padding = (512 - (size % 512)) % 512;
+            await callback(entry, buffer);
+
+            // Padding Skip
+            const padding = (512 - (cntSize % 512)) % 512;
             if (padding > 0) await buffer.readExact(padding);
         }
 
         reader.releaseLock();
-
     }
 
     private async pipeToNone(buffer: StreamBuffer, size: number): Promise<void> {
