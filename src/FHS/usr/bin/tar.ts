@@ -62,7 +62,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         return 1;
     }
 
-    const archiver = new Archiver(proc.fs);
+    const archiver = sys.createArchiver(proc);
     const strArchiveFile = parser.get('file') as string;
     const targets = parser.args; 
 
@@ -96,18 +96,19 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
 
             } else {
                 // File
-                const handle = await proc.fs.open(strArchiveFile, 'r');
-                rsInput = createFileSourceStream(handle);
+                //const handle = await proc.fs.open(strArchiveFile, 'r');
+                //rsInput = createFileSourceStream(handle);
+                rsInput = await proc.fs.readFile(strArchiveFile, 'binary') as any;
             }
 
             if (isList) {
                 // [List]
                 if (!proc.stdout) throw new Error('tar: Stdout not available');
-                const writer = proc.stdout.getByteWriter();
+                const writer = proc.stdout.getStringWriter();
                 await archiver.list(rsInput, writer);
             } else {
                 // [Extract]
-                const destDir = (parser.get('directory') as string) || '.';
+                const destDir = (parser.get('directory') as string) || proc.fs.getCWD();
                 await archiver.extract(rsInput, destDir);
             }
         }

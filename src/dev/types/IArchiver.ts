@@ -20,4 +20,7 @@ export interface IArchiver {
     extract(source: Uint8Array | ReadableStream<Uint8Array>, destDir?: string): Promise<void>;
     /** 指定パスを .tar.gz ストリームとしてアーカイブ */
     archive(sourcePaths: string[]): ReadableStream<Uint8Array>;
+
+    list(source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>, writer: WritableStreamDefaultWriter<string>): Promise<void> ;
+
 }

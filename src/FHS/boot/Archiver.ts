@@ -31,31 +31,38 @@ export class Archiver {
      */
     public async extract(source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>, destDir: string = '/'): Promise<void> {
         console.log(`[Archiver] Extracting stream to ${destDir} (GNU Supported)...`);
-        const srcStream = this.normalizeStream(source);
-        const gunzipStream = srcStream.pipeThrough(new DecompressionStream('gzip') as any) as ReadableStream<Uint8Array>;
+
+        let srcStream: ReadableStream<Uint8Array>;
+        if (source instanceof Uint8Array) {
+            srcStream = new Blob([source]).stream();
+        } else {
+            srcStream = source;
+        }
+
+        const gunzipStream = srcStream.pipeThrough(new DecompressionStream('gzip') as ReadableWritablePair<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>);
         await this.processTarStream(gunzipStream, async (header, buffer) => {
-                const fullPath = (destDir === '/' ? '' : destDir) + '/' + header.name;
+            const fullPath = (destDir === '/' ? '' : destDir) + '/' + header.name;
 
-                if (header.type === '5') {
-                    // 📂 ディレクトリ
-                    await this.fsManager.makeDir(fullPath, true);
-                } else {
-                    try {
-                        if ((await this.fsManager.getStat(fullPath)).isFile()) {
-                            await this.fsManager.unlink(fullPath);
-                        }
-                        //this.touchFile(pathResolved);
-                    } catch (e) { }
-                    // 📄 ファイル ('0' or '\0')
-                    const parentDir = fullPath.substring(0, fullPath.lastIndexOf('/'));
-                    if (parentDir) await this.fsManager.makeDir(parentDir, true);
-
-                    if (header.size > 0) {
-                        await this.pipeToFile(buffer, fullPath, header.size);
-                    } else {
-                        await this.fsManager.touchFile(fullPath);
+            if (header.type === '5') {
+                // 📂 ディレクトリ
+                await this.fsManager.makeDir(fullPath, true);
+            } else {
+                try {
+                    if ((await this.fsManager.getStat(fullPath)).isFile()) {
+                        await this.fsManager.unlink(fullPath);
                     }
+                    //this.touchFile(pathResolved);
+                } catch (e) { }
+                // 📄 ファイル ('0' or '\0')
+                const parentDir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+                if (parentDir) await this.fsManager.makeDir(parentDir, true);
+
+                if (header.size > 0) {
+                    await this.pipeToFile(buffer, fullPath, header.size);
+                } else {
+                    await this.fsManager.touchFile(fullPath);
                 }
+            }
 
         });
     }
@@ -63,14 +70,15 @@ export class Archiver {
     /**
      * 📜 リスト: アーカイブ内のファイル一覧を表示 (展開しない)
      */
-    public async list(source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>, writer: WritableStreamDefaultWriter<Uint8Array>): Promise<void> {
+    public async list(source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>, writer: WritableStreamDefaultWriter<string>): Promise<void> {
         const srcStream = this.normalizeStream(source);
         const gunzipStream = srcStream.pipeThrough(new DecompressionStream('gzip') as any) as ReadableStream<Uint8Array>;
-        const enc = new TextEncoder();
-
+        console.log("aa");
         await this.processTarStream(gunzipStream, async (header, buffer) => {
             // シンプルにファイル名を出力 (ls -l風にするならここで header.size や mtime を使う)
-            await writer.write(enc.encode(`${header.name}\n`));
+            console.log(header.name);
+            await writer.write(`${header.name}\n`);
+            await this.pipeToNone(buffer, header.size);
 
         });
     }
@@ -114,49 +122,74 @@ export class Archiver {
         const reader = stream.getReader();
         const buffer = new StreamBuffer(reader);
         const dec = new TextDecoder();
+
+        // 🌟 GNU LongLink用の状態保持変数
+        // Type 'L' が来たらここに次回用の名前が入る
         let strNextLongName: string | null = null;
 
-        try {
-            while (true) {
-                const header = await buffer.readExact(512);
-                if (!header) break;
+        while (true) {
+            const header = await buffer.readExact(512);
+            if (!header) break;
 
-                // Basic Parse
-                let name = dec.decode(header.subarray(0, 100)).replace(/\0/g, '').trim();
-                if (!name) break; // End of Archive
+            // ファイル名 (一旦取得するが、LongNameがあればそちら優先)
+            let name = dec.decode(header.subarray(0, 100)).replace(/\0/g, '').trim();
+            if (!name) break; // End of Tar
 
-                const sizeStr = dec.decode(header.subarray(124, 136)).trim();
-                const size = parseInt(sizeStr, 8);
-                const type = String.fromCharCode(header[156]);
+            // サイズ (8進数)
+            const sizeStr = dec.decode(header.subarray(124, 136)).trim();
+            const size = parseInt(sizeStr, 8);
 
-                // GNU LongLink
-                if (type === 'L') {
-                    const bufName = await buffer.readExact(size);
-                    if (!bufName) throw new Error("Unexpected EOF in LongLink");
-                    strNextLongName = dec.decode(bufName).replace(/\0/g, '');
-                    
-                    // Padding
-                    const padding = (512 - (size % 512)) % 512;
-                    if (padding > 0) await buffer.readExact(padding);
-                    continue;
-                }
+            // タイプフラグ ( '0':File, '5':Dir, 'L':GNU LongName )
+            const type = String.fromCharCode(header[156]);
 
+            // GNU LongLink (Type 'L') の処理
+            if (type === 'L') {
+                // コンテンツ部分(=本当のファイル名)を読み込む
+                // ファイル名はメモリに乗るサイズなのでreadExactでOK
+                const bufName = await buffer.readExact(size);
+                if (!bufName) throw new Error("Unexpected EOF in LongLink");
+                
+                strNextLongName = dec.decode(bufName).replace(/\0/g, '');
 
-                // LongNameがあればそれを使用し、変数をリセット
-                const finalName = strNextLongName ? strNextLongName : name;
-                strNextLongName = null; // 消費完了
-
-                // パス解決
-                const cleanName = finalName.startsWith('/') ? finalName.slice(1) : finalName;
-
-                // Callback
-                await callback({ name: cleanName, size, type }, buffer);
-
+                // パディング読み飛ばし
                 const padding = (512 - (size % 512)) % 512;
                 if (padding > 0) await buffer.readExact(padding);
+
+                // ※ ここではファイル作成せず、次のヘッダーループへ進む
+                continue;
             }
-        } finally {
-            reader.releaseLock();
+
+            // --- ここから通常のファイル/ディレクトリ処理 ---
+
+            // LongNameがあればそれを使用し、変数をリセット
+            const finalName = strNextLongName ? strNextLongName : name;
+            strNextLongName = null; // 消費完了
+
+            // パス解決
+            const cleanName = finalName.startsWith('/') ? finalName.slice(1) : finalName;
+
+            console.log("cleanName"+ cleanName);
+            await callback({name:cleanName, size, type}, buffer);
+
+            // パディング読み飛ばし (ファイル本体のパディング)
+            const padding = (512 - (size % 512)) % 512;
+            if (padding > 0) await buffer.readExact(padding);
+        }
+
+        reader.releaseLock();
+
+    }
+
+    private async pipeToNone(buffer: StreamBuffer, size: number): Promise<void> {
+        let remaining = size;
+        const CHUNK_SIZE = 64 * 1024; // 64KBずつ捨てる
+
+        while (remaining > 0) {
+            const readSize = Math.min(remaining, CHUNK_SIZE);
+            const chunk = await buffer.readExact(readSize);
+            
+            if (!chunk) throw new Error("Unexpected EOF while skipping");
+            remaining -= chunk.byteLength;
         }
     }
 
@@ -165,6 +198,7 @@ export class Archiver {
         // ※ 本来は fsManager.open() 経由推奨だが、書き込み速度優先でNode互換APIを使用
         const writeStream = fs.createWriteStream(path);
         let remaining = size;
+        
         while (remaining > 0) {
             const chunk = await buffer.readExact(remaining);
             if (!chunk) throw new Error("Unexpected EOF");

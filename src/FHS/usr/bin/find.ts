@@ -46,8 +46,8 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     // 1. 簡易ヘルプチェック
     if (args.includes('--help')) {
         await writer.writeString(getHelp());
-        writer.releaseLock();
-        errWriter.releaseLock();
+        writer.close();
+        errWriter.close();
         return 0;
     }
 
@@ -92,8 +92,8 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         }
     }
 
-    writer.releaseLock();
-    errWriter.releaseLock();
+    writer.close();
+    errWriter.close();
     return exitCode;
 }
 
