@@ -304,78 +304,53 @@ class StreamBuffer {
     
     constructor(private reader: ReadableStreamDefaultReader<Uint8Array>) {}
 
-/**
+    /**
      * 指定したバイト数（size）を正確に読み取る
      * Application Hungarian: cnt (Counter), dst (Destination)
      */
-/**
-     * 指定したバイト数（size）を正確に読み取る
-     * Application Hungarian: cnt (Counter), dst (Destination)
-     */
-public async readExact(cntSize: number): Promise<Uint8Array | null> {
-    const dstBuffer = new Uint8Array(cntSize);
-    let cntOffset = 0;
+    public async readExact(cntSize: number): Promise<Uint8Array | null> {
+        const dstBuffer = new Uint8Array(cntSize);
+        let cntOffset = 0;
 
-    while (cntOffset < cntSize) {
-        // 内部バッファが空なら補充する
-        if (this.chunks.length === 0) {
-            const { done, value } = await this.reader.read();
-            if (done) break; 
-            if (value) {
-                this.chunks.push(value);
-                this.totalBytes += value.byteLength;
+        while (cntOffset < cntSize) {
+            // 内部バッファが空なら補充する
+            if (this.chunks.length === 0) {
+                const { done, value } = await this.reader.read();
+                if (done) break; 
+                if (value) {
+                    this.chunks.push(value);
+                    this.totalBytes += value.byteLength;
+                }
+            }
+
+            if (this.chunks.length === 0) break;
+
+            const srcChunk = this.chunks[0];
+            const cntRemainingNeeded = cntSize - cntOffset;
+            const cntAvailable = srcChunk.byteLength;
+
+            if (cntAvailable <= cntRemainingNeeded) {
+                // チャンク丸ごとコピー
+                dstBuffer.set(srcChunk, cntOffset);
+                cntOffset += cntAvailable;
+                this.totalBytes -= cntAvailable;
+                this.chunks.shift(); // 使い切ったので削除
+            } else {
+                // チャンクの一部だけコピー
+                dstBuffer.set(srcChunk.subarray(0, cntRemainingNeeded), cntOffset);
+                // 残った分をチャンクに戻す
+                this.chunks[0] = srcChunk.subarray(cntRemainingNeeded);
+                cntOffset += cntRemainingNeeded;
+                this.totalBytes -= cntRemainingNeeded;
             }
         }
 
-        if (this.chunks.length === 0) break;
-
-        const srcChunk = this.chunks[0];
-        const cntRemainingNeeded = cntSize - cntOffset;
-        const cntAvailable = srcChunk.byteLength;
-
-        if (cntAvailable <= cntRemainingNeeded) {
-            // チャンク丸ごとコピー
-            dstBuffer.set(srcChunk, cntOffset);
-            cntOffset += cntAvailable;
-            this.totalBytes -= cntAvailable;
-            this.chunks.shift(); // 使い切ったので削除
-        } else {
-            // チャンクの一部だけコピー
-            dstBuffer.set(srcChunk.subarray(0, cntRemainingNeeded), cntOffset);
-            // 残った分をチャンクに戻す
-            this.chunks[0] = srcChunk.subarray(cntRemainingNeeded);
-            cntOffset += cntRemainingNeeded;
-            this.totalBytes -= cntRemainingNeeded;
+        // 指定サイズに満たなかった場合は null を返す（ファイル末尾など）
+        if (cntOffset < cntSize) {
+            console.warn(`[Archiver] Unexpected end of stream. Expected ${cntSize}, got ${cntOffset}`);
+            return null;
         }
-    }
 
-    // 指定サイズに満たなかった場合は null を返す（ファイル末尾など）
-    if (cntOffset < cntSize) {
-        console.warn(`[Archiver] Unexpected end of stream. Expected ${cntSize}, got ${cntOffset}`);
-        return null;
-    }
-
-    return dstBuffer;
-}
-    async readChunk(maxSize: number): Promise<Uint8Array | null> {
-        if (this.chunks.length === 0) {
-            const { done, value } = await this.reader.read();
-            if (done) return null;
-            if (value) {
-                this.chunks.push(value);
-                this.totalBytes += value.byteLength;
-            }
-        }
-        const chunk = this.chunks[0];
-        if (chunk.byteLength <= maxSize) {
-            this.chunks.shift();
-            this.totalBytes -= chunk.byteLength;
-            return chunk;
-        } else {
-            const ret = chunk.subarray(0, maxSize);
-            this.chunks[0] = chunk.subarray(maxSize);
-            this.totalBytes -= maxSize;
-            return ret;
-        }
+        return dstBuffer;
     }
 } 
