@@ -23,25 +23,24 @@ import { createFileSinkStream, createFileSourceStream } from '../lib/FileStreamA
 
 /**
  * [Command: tar]
- * アーカイブユーティリティ。
- * Kernel Moduleである Archiver クラスのラッパーとして機能し、
- * ストリームベースの .tar.gz 作成・展開を提供する。
+ * -c: 複数ファイル対応
+ * -t: リスト表示対応
+ * -x: 標準入力対応 (Reader -> Stream 変換追加)
  */
 export async function main(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
     const parser = new CommandParser(args, {
         name: 'tar',
         usage: '[OPTION...] [FILE]...',
-        desc: 'GNU tar saves many files together into a single tape or disk archive, and can restore individual files from the archive.',
+        desc: 'GNU tar archive utility',
         options: [
             { short: 'c', long: 'create', desc: 'create a new archive' },
             { short: 'x', long: 'extract', desc: 'extract files from an archive' },
-            { short: 't', long: 'list', desc: 'list the contents of an archive' }, // Current Archiver doesn't support list stream yet, but reserving flag
+            { short: 't', long: 'list', desc: 'list the contents of an archive' },
             { short: 'f', long: 'file', desc: 'use archive file or device ARCHIVE', hasArg: true },
             { short: 'v', long: 'verbose', desc: 'verbosely list files processed' },
             { short: 'z', long: 'gzip', desc: 'filter the archive through gzip' },
             { short: 'C', long: 'directory', desc: 'change to directory DIR', hasArg: true },
-            { long: 'help', desc: 'display this help and exit' },
-            { long: 'version', desc: 'output version information and exit' }
+            { long: 'help', desc: 'display this help and exit' }
         ]
     });
 
@@ -52,100 +51,65 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         return 0;
     }
 
-    if (parser.has(undefined, 'version')) {
-        const writer = new BinaryWriter(proc.stdout!.getByteWriter());
-        await writer.writeString('tar (KinbroOS) 1.0\nBased on GNU tar 1.34 logic\n');
-        await writer.close();
-        return 0;
-    }
-
-    // --- Mode Selection ---
     const isCreate = parser.has('c', 'create');
     const isExtract = parser.has('x', 'extract');
+    const isList = parser.has('t', 'list');
     
-    if (!isCreate && !isExtract) {
-        const writer = new BinaryWriter(proc.stderr!.getByteWriter());
-        await writer.writeString('tar: You must specify one of the options -c, -x\nTry \'tar --help\' for more information.\n');
-        await writer.close();
+    if (!isCreate && !isExtract && !isList) {
+        const err = new BinaryWriter(proc.stderr!.getByteWriter());
+        await err.writeString('tar: Must specify one of -c, -x, -t\n');
+        await err.close();
         return 1;
     }
 
-    // --- Setup Context ---
     const archiver = new Archiver(proc.fs);
     const strArchiveFile = parser.get('file') as string;
-    const targets = parser.args; // 残りの引数 (対象ファイル/ディレクトリ)
-    
-    // 作業ディレクトリの変更 (-C)
-    // ※ プロセスのCWDを変えるわけにはいかないので、Archiverへのパス解決時に考慮する必要があるが、
-    //    現在のArchiverは絶対パス/相対パスをそのまま受け取る。
-    //    簡易実装として process.chdir 相当を行うか、パス結合で対応する。
-    //    今回は簡易的に、argsのパス解釈に委ねる（-Cの実装はFS依存が深いため今回はスキップし、Noteに残す）
+    const targets = parser.args; 
 
     try {
         if (isCreate) {
-            // ==========================================
-            // 🎁 Create Mode (-c)
-            // ==========================================
-            if (targets.length === 0) {
-                throw new Error('tar: Cowardly refusing to create an empty archive');
-            }
-
-            // Current Archiver Limitation: Single root support mainly.
-            // 複数指定された場合は、とりあえず最初の1つを処理するか、ループする設計。
-            // Archiver.archive returns a Stream.
-            // 複数ファイルを1つのtarにするには streamTar のループが必要だが、
-            // 公開APIの archive() は単一パスしか受け取らない。
-            // → 今回は「最初の引数のみ」をアーカイブする仕様とする (or Wrap logic needed)
-            const srcPath = targets[0]; 
-
-            // Output Destination
+            // [Create]
+            if (targets.length === 0) throw new Error('tar: Cowardly refusing to create an empty archive');
+            
             let wsOutput: WritableStream<Uint8Array>;
-
             if (!strArchiveFile || strArchiveFile === '-') {
-                // Stdout
-                if (!proc.stdout) throw new Error('tar: Standard output not available');
+                if (!proc.stdout) throw new Error('tar: Stdout not available');
                 wsOutput = proc.stdout.getByteWriter() as any; 
-                // Note: stdoutは閉じない方が行儀が良いが、tarのメイン出力なので閉じる責務を持つ場合もある。
-                // proc.stdout自体はcloseしないが、writerはreleaseする。
             } else {
-                // File
                 const handle = await proc.fs.open(strArchiveFile, 'w');
                 wsOutput = createFileSinkStream(handle);
             }
 
-            // Execute
-            // Archiver.archive は .tar.gz の ReadableStream を返す
-            const rsArchive = archiver.archive(srcPath);
-
-            // Pipe: rsArchive -> wsOutput
+            const rsArchive = archiver.archive(targets);
             await rsArchive.pipeTo(wsOutput);
 
-        } else if (isExtract) {
-            // ==========================================
-            // 📦 Extract Mode (-x)
-            // ==========================================
-            
-            // Input Source
+        } else {
+            // [Extract or List] Input is archive
             let rsInput: ReadableStream<Uint8Array>;
-
             if (!strArchiveFile || strArchiveFile === '-') {
                 // Stdin
-                if (!proc.stdin) throw new Error('tar: Standard input not available');
-                rsInput = proc.stdin.getByteReader() as any;
+                if (!proc.stdin) throw new Error('tar: Stdin not available');
+                
+                // 🌟 Fix: Reader を Stream に変換する
+                const reader = proc.stdin.getByteReader();
+                rsInput = streamFromReader(reader);
+
             } else {
                 // File
                 const handle = await proc.fs.open(strArchiveFile, 'r');
                 rsInput = createFileSourceStream(handle);
             }
 
-            // Destination Dir (Default: Current Directory)
-            // -C オプションがあればそこへ、なければ '.'
-            const destDir = (parser.get('directory') as string) || '.';
-            
-            // Execute
-            // extract() は内部で DecompressionStream('gzip') を通す
-            // 入力が生tarの場合はエラーになる可能性があるが、現在は .tar.gz 前提
-            await archiver.extract(rsInput, destDir);
+            if (isList) {
+                // [List]
+                if (!proc.stdout) throw new Error('tar: Stdout not available');
+                const writer = proc.stdout.getByteWriter();
+                await archiver.list(rsInput, writer);
+            } else {
+                // [Extract]
+                const destDir = (parser.get('directory') as string) || '.';
+                await archiver.extract(rsInput, destDir);
+            }
         }
 
     } catch (e: any) {
@@ -156,4 +120,31 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     }
 
     return 0;
+}
+
+/**
+ * 🌟 Helper: Reader -> Stream Adapter
+ * DefaultReaderをラップして、ReadableStream<Uint8Array> として振る舞わせる
+ */
+function streamFromReader(reader: ReadableStreamDefaultReader<Uint8Array>): ReadableStream<Uint8Array> {
+    return new ReadableStream({
+        async pull(controller) {
+            try {
+                const { done, value } = await reader.read();
+                if (done) {
+                    controller.close();
+                    reader.releaseLock();
+                } else {
+                    controller.enqueue(value);
+                }
+            } catch (e) {
+                controller.error(e);
+                reader.releaseLock();
+            }
+        },
+        cancel() {
+            reader.cancel();
+            reader.releaseLock();
+        }
+    });
 }

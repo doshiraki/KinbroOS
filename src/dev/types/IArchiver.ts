@@ -19,5 +19,5 @@ export interface IArchiver {
     /** 指定ディレクトリに展開 */
     extract(source: Uint8Array | ReadableStream<Uint8Array>, destDir?: string): Promise<void>;
     /** 指定パスを .tar.gz ストリームとしてアーカイブ */
-    archive(sourcePath: string): ReadableStream<Uint8Array>;
+    archive(sourcePaths: string[]): ReadableStream<Uint8Array>;
 }
