@@ -15,7 +15,7 @@
  */
 
 import { SystemAPI } from '../../../dev/types/SystemAPI';
-import { IProcess, TTYMode } from '../../../dev/types/IProcess'; // TTYModeが必要
+import { IProcess, TTYMode } from '../../../dev/types/IProcess';
 import { CommandParser } from '../lib/CommandParser';
 import { BinaryReader, BinaryWriter } from '../lib/StreamUtils';
 import { createFileSourceStream } from '../lib/FileStreamAdapter';
@@ -23,7 +23,7 @@ import { createFileSourceStream } from '../lib/FileStreamAdapter';
 /**
  * [Command: less]
  * テキストファイル閲覧のためのページャー。
- * Nanoの実装を参考に、Rawモードでのキー制御とAlternate Screen Bufferを提供する。
+ * ちらつき防止(Double Buffering)、折り返し防止(NoWrap)、Rawモード制御を実装。
  */
 export async function main(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
     const parser = new CommandParser(args, {
@@ -69,10 +69,10 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         return 1;
     }
 
-    // 2. Start Viewer (Raw Mode Control)
+    // 2. Start Viewer
     const viewer = new LessViewer(proc, content, filename, parser.has('N'));
     
-    // 🌟 重要: Rawモードへ切り替え (nanoと同様)
+    // Rawモードへ切り替え
     if (proc.stdin && proc.stdin.setMode) {
         await proc.stdin.setMode(TTYMode.Raw);
     }
@@ -80,7 +80,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     try {
         await viewer.start();
     } finally {
-        // 🌟 重要: Cookedモードへ復帰 (これを忘れるとシェルが壊れる)
+        // Cookedモードへ復帰
         if (proc.stdin && proc.stdin.setMode) {
             await proc.stdin.setMode(TTYMode.Cooked);
         }
@@ -105,7 +105,7 @@ async function readAllFromReader(reader: ReadableStreamDefaultReader<Uint8Array>
             if (done) break;
             result += decoder.decode(value, { stream: true });
         }
-        result += decoder.decode(); // flush
+        result += decoder.decode();
     } finally {
         reader.releaseLock();
     }
@@ -135,45 +135,47 @@ class LessViewer {
         this.reader = new BinaryReader(proc.stdin!.getByteReader());
         this.showLineNumbers = showLineNumbers;
 
-        // 環境変数からサイズ取得
         this.rows = parseInt(proc.env.get('LINES') || '24');
         this.cols = parseInt(proc.env.get('COLUMNS') || '80');
     }
 
     public async start() {
-        // Alternate Screen Buffer ON & Cursor Hide & Home
-        await this.writeRaw('\x1b[?1049h\x1b[?25l\x1b[H');
+        // Init Sequence:
+        // \x1b[?1049h : Alt Buffer On
+        // \x1b[?25l   : Cursor Hide
+        // \x1b[?7l    : Auto Wrap Off (🌟 これで勝手な折り返しを防ぐ)
+        // \x1b[H      : Home
+        await this.writer.writeString('\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[H');
 
         try {
             await this.render();
             await this.inputLoop();
         } finally {
-            // Cleanup: Cursor Show & Alt Buffer OFF
-            await this.writeRaw('\x1b[?25h\x1b[?1049l');
+            // Cleanup Sequence:
+            // \x1b[?7h    : Auto Wrap On (戻す)
+            // \x1b[?25h   : Cursor Show
+            // \x1b[?1049l : Alt Buffer Off
+            await this.writer.writeString('\x1b[?7h\x1b[?25h\x1b[?1049l');
             await this.writer.close();
             this.reader.releaseLock();
         }
     }
 
-    private async writeRaw(str: string) {
-        await this.writer.writeString(str);
-    }
-
+    /**
+     * 🌟 Flicker-Free Render
+     */
     private async render() {
-        // 画面クリアは Alt Buffer 切替直後やスクロール時に行うが、
-        // ちらつき防止のため全消去ではなく行ごとの上書きを基本とする。
-        // ただし簡易実装として毎回クリアする
-        await this.writeRaw('\x1b[2J\x1b[H');
+        let buffer = '\x1b[H';
 
         const maxDigit = this.lines.length.toString().length;
         const gutterWidth = this.showLineNumbers ? maxDigit + 2 : 0;
         const contentWidth = this.cols - gutterWidth;
 
         // Draw Lines
-        // ステータスライン用に1行空ける
         for (let i = 0; i < this.rows - 1; i++) {
             const lineIdx = this.topRow + i;
-            await this.writeRaw(`\x1b[${i + 1};1H`); // Move cursor
+
+            buffer += `\x1b[${i + 1};1H`;
 
             if (lineIdx < this.lines.length) {
                 let line = this.lines[lineIdx];
@@ -181,7 +183,7 @@ class LessViewer {
                 // 行番号
                 if (this.showLineNumbers) {
                     const numStr = (lineIdx + 1).toString().padStart(maxDigit, ' ');
-                    await this.writeRaw(`\x1b[33m${numStr}  \x1b[39m`);
+                    buffer += `\x1b[33m${numStr}  \x1b[39m`;
                 }
 
                 // 横スクロール
@@ -191,7 +193,8 @@ class LessViewer {
                     line = '';
                 }
                 
-                // 幅制限
+                // 幅制限 (Auto Wrap Offにしたので、多少はみ出ても画面崩れはしないが、念のため)
+                // 全角文字を考慮して少し余裕を持って切る
                 if (line.length > contentWidth) {
                     line = line.slice(0, contentWidth);
                 }
@@ -200,38 +203,42 @@ class LessViewer {
                 if (this.searchPattern && line.includes(this.searchPattern)) {
                     const parts = line.split(this.searchPattern);
                     const highlighted = parts.join(`\x1b[7m${this.searchPattern}\x1b[27m`);
-                    await this.writeRaw(highlighted);
+                    buffer += highlighted;
                 } else {
-                    await this.writeRaw(line);
+                    buffer += line;
                 }
 
             } else {
                 // End of file marker (~)
-                await this.writeRaw('\x1b[34m~\x1b[39m');
+                buffer += '\x1b[34m~\x1b[39m';
             }
+
+            buffer += '\x1b[K'; // 行末消去
         }
 
         // Status Line (Bottom)
-        await this.writeRaw(`\x1b[${this.rows};1H\x1b[7m`); // Inverse
+        buffer += `\x1b[${this.rows};1H\x1b[7m`; 
         if (this.message) {
-            await this.writeRaw(this.message.padEnd(this.cols, ' '));
+            buffer += this.message.padEnd(this.cols, ' ');
             this.message = ''; 
         } else {
             const pct = Math.floor(((this.topRow + this.rows - 1) / this.lines.length) * 100);
             const status = `${this.filename} ${this.topRow + 1}/${this.lines.length} lines (${pct}%) ${this.searchPattern ? `/${this.searchPattern}` : ''}`;
-            await this.writeRaw(status.padEnd(this.cols, ' '));
+            buffer += status.padEnd(this.cols, ' ');
         }
-        await this.writeRaw('\x1b[27m'); // Reset
+        buffer += '\x1b[27m\x1b[K';
+
+        await this.writer.writeString(buffer);
     }
 
     private async inputLoop() {
         while (true) {
-            // Raw Mode なので1バイトずつ即座に来る
             const key = await this.readKey();
 
             if (key === 'q' || key === 'Q') return;
 
             // Navigation
+            let needRender = true;
             switch (key) {
                 case 'j':
                 case '\r': 
@@ -264,7 +271,8 @@ class LessViewer {
                     break;
                 case 'G':
                 case 'End':
-                    this.scrollTo(this.lines.length - (this.rows - 1));
+                    // 🌟 修正: 確実に最後まで行けるように、最大値へ飛ばす
+                    this.scrollTo(this.lines.length); 
                     break;
                 case 'ArrowRight':
                     this.hScroll(1);
@@ -282,35 +290,31 @@ class LessViewer {
                 case 'N': // Prev
                     this.findNext(-1);
                     break;
+                default:
+                    needRender = false;
+                    break;
             }
-            await this.render();
+            if (needRender) await this.render();
         }
     }
 
     // --- Search Logic ---
-
     private async promptSearch() {
         let pattern = '';
-        
-        // 簡易行編集モードに入る
         while (true) {
-            // ステータス行に入力欄を表示
-            await this.writeRaw(`\x1b[${this.rows};1H\x1b[K/${pattern}`);
-            
+            await this.writer.writeString(`\x1b[${this.rows};1H\x1b[K/${pattern}`);
             const key = await this.readKey();
-            
             if (key === '\r' || key === '\n') {
                 break;
             } else if (key === 'Backspace' || key === '\x7f') {
                 pattern = pattern.slice(0, -1);
             } else if (key === 'Escape') {
-                pattern = ''; // Cancel
+                pattern = '';
                 break;
             } else if (key.length === 1) {
                 pattern += key;
             }
         }
-
         if (pattern) {
             this.searchPattern = pattern;
             this.findNext(1);
@@ -322,9 +326,7 @@ class LessViewer {
             this.message = 'No search pattern';
             return;
         }
-        
         let start = this.topRow + dir;
-        // 範囲外ならラップアラウンドさせてもいいが、今回は単純に止める
         if (start < 0) start = 0;
         if (start >= this.lines.length) start = this.lines.length - 1;
 
@@ -344,14 +346,12 @@ class LessViewer {
                 }
             }
         }
-
         if (found !== -1) {
             this.topRow = found;
         } else {
             this.message = 'Pattern not found';
         }
     }
-
 
     // --- Core Logic ---
     private scroll(delta: number) {
@@ -370,40 +370,35 @@ class LessViewer {
         this.topRow = y;
         this.clamp();
     }
+
     private clamp() {
         if (this.topRow < 0) this.topRow = 0;
-        const max = Math.max(0, this.lines.length - (this.rows - 1));
+        
+        // 🌟 修正: スクロール上限を「ファイルの末尾が画面の上端に来る」まで許可する
+        // これにより、viのようにファイルの最後以降(~)を表示できるようになり、
+        // 「最後の数行が見切れる」問題を根本的に解決する。
+        // (旧: this.lines.length - (this.rows - 1))
+        const max = this.lines.length - 1; 
+
         if (this.topRow > max) this.topRow = max;
     }
 
-    // --- Key Reader (Nano Style) ---
+    // --- Key Reader ---
     private async readKey(): Promise<string> {
         const { value, done } = await this.reader.read();
         if (done) return 'q';
         
-        // 1バイトだけとは限らないが、エスケープシーケンス判定のため先頭を見る
-        // WebStreamsからの入力はチャンクになっている可能性がある
-        // 簡易実装として、チャンクの先頭バイトで判断し、足りなければ追加で読む
-        
         const u8 = value;
         if (u8.length === 0) return '';
-        
         const charCode = u8[0];
 
-        if (charCode === 27) { // ESC
+        if (charCode === 27) { 
             if (u8.length === 1) {
-                // 単独のESCキーかもしれないし、シーケンスの途中かもしれない
-                // 本当はタイムアウト判定が必要だが、ここでは「次にすぐデータが来る」と仮定して読む
-                // (readKeyFromStreamで1文字ずつ読む設計の方が安全だが、今回はチャンクを信じる)
-                
-                // Note: read() はロックするので、非同期で待つのは難しい。
-                // Nano.ts を参考に、ここだけはブロックして追加読み込みする
-                const next = await this.reader.read(); // wait next
+                const next = await this.reader.read(); 
                 if (next.done || !next.value) return 'Escape';
                 const seq = next.value;
                 return this.parseEscape(seq);
             } else {
-                // 同じチャンクに入っている場合
                 return this.parseEscape(u8.subarray(1));
             }
         }
@@ -426,10 +421,10 @@ class LessViewer {
                 case 'D': return 'ArrowLeft';
                 case 'H': return 'Home';
                 case 'F': return 'End';
-                case '5': return 'PageUp'; // ~ は省略
+                case '5': return 'PageUp'; 
                 case '6': return 'PageDown';
             }
         }
-        return 'Escape'; // Unhandled
+        return 'Escape';
     }
 }
