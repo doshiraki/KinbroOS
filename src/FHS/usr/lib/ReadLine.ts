@@ -351,7 +351,7 @@ export class ReadLine {
         const strTarget = strUpToCursor.slice(lastSpaceIdx + 1);
 
         // 3. 補完候補取得 (ターゲットとなる単語のみを渡す)
-        const arrMatches = await this.fnCompleter(strTarget);
+        let arrMatches = await this.fnCompleter(strTarget);
 
         if (arrMatches.length === 0) {
             return { result: ReadLineResult.Processed };
@@ -371,7 +371,7 @@ export class ReadLine {
 
         // 6. 候補が複数ある場合 (またはLCP補完後もまだ候補が残る場合) は一覧表示
         if (arrMatches.length > 1) {
-            this.writer.writeString('\r\n' + arrMatches.join('  ') + '\r\n');
+            this.writer.writeString('\r\n' + arrMatches.map(s=>s.substring(s.lastIndexOf("/", s.length-2)+1)).join('  ') + '\r\n');
             
             // プロンプトと現在のバッファ内容を再描画 (カーソルは行末へ)
             await this.writer.writeString(this.currentPromptStr + this.strInputBuffer);
