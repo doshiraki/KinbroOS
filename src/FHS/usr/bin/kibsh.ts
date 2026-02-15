@@ -66,7 +66,6 @@ export class Kibsh implements IShell {
              if(w) { await w.write('geek\r\n'); await w.close(); } 
              return 0; 
         },
-        'tar': this.cmdTar.bind(this),
         'zenput': this.cmdZenPut.bind(this),
         'zenget': this.cmdZenGet.bind(this),
     };
@@ -499,37 +498,6 @@ export class Kibsh implements IShell {
     private async cmdEcho(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
         const writer = proc.stdout!.getStringWriter();
         await writer.write(args.map((x)=>x.replace("\r", "\\r").replace("\n","\\n")).join(' ') + '\n');
-        await writer.close();
-        return 0;
-    }
-
-    private async cmdTar(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
-        const writer = proc.stdout!.getStringWriter();
-        const parser = new CommandParser(args, {
-            name: 'tar',
-            usage: 'xf <FILE> [-C <DIR>]',
-            desc: 'Extract files from an archive.',
-            options: [
-                { short: 'x', desc: 'extract files from an archive' },
-                { short: 'f', desc: 'use archive file' },
-                { short: 'C', desc: 'change to directory DIR' }
-            ]
-        });
-        if (!parser.has('x') || !parser.args[0]) {
-            await writer.write("tar: Only 'tar xf <file>' is supported currently.\r\n");
-            await writer.close(); return 1;
-        }
-        try {
-            const filePath = parser.args[0];
-            const destDir = parser.has('C') ? parser.args[1] : proc.fs.getCWD();
-            const archiver = sys.createArchiver(proc);
-            const data = await proc.fs.readFile(filePath, 'binary') as Uint8Array;
-            await archiver.extract(data, destDir);
-            await writer.write(`Extracted ${filePath} to ${destDir}\r\n`);
-        } catch (e: any) {
-            await writer.write(`tar: ${e.message}\r\n`);
-            await writer.close(); return 1;
-        }
         await writer.close();
         return 0;
     }
