@@ -33,7 +33,7 @@ Current AI interactions are ephemeral. Chatbots have "knowledge" but lack "memor
 KinbroOS solves this by providing:
 
 1.  **Thinking on Disk:** A persistent file system (`/home`) where AI can store context, logs, and intermediate thoughts using OPFS.
-2.  **Parasitic Architecture:** It injects itself into existing web pages (e.g., Google Gemini, ChatGPT), allowing the AI to control the browser context directly.
+2.  **Parasitic Architecture:** It injects itself into existing web pages (e.g., Google Gemini), allowing the AI to control the browser context directly.
 3.  **Deterministic Freedom:** By giving AI a UNIX shell (`kibsh`), we unlock their latent ability to use tools (`sed`, `grep`, `git`) creatively and accurately.
 
 ## 🚀 Key Features (Preview)
