@@ -23,9 +23,9 @@ import { IFileStream } from '@/dev/types/IFileStream';
 
 /**
  * [Class: FileSystemManager]
- * 仮想ファイルシステム (ZenFS) の管理クラス。
- * OSの個性（具体的なOPFSパスなど）を持たず、
- * 外部から注入されたディレクトリハンドルをマウントする機構を提供する。
+ * Management class for Virtual File System (ZenFS).
+ * Agnostic to OS specifics (e.g., concrete OPFS paths),
+ * provides a mechanism to mount externally injected directory handles.
  */
 export class FileSystemManager implements IFileSystem {
     private env: IEnvManager;
@@ -58,21 +58,21 @@ export class FileSystemManager implements IFileSystem {
         await fsPromises.chmod(pathResolved, mode);
     }
 
-    // 🌟 New: OSが使っている生のZenFSインスタンスを返すバックドア
-    // これを git に渡すことで、同じファイルシステムを操作させる
+    // [New] Backdoor returning the raw ZenFS instance used by the OS
+    // Passing this to git allows operating on the same filesystem
     public getBackend(): any {
         return rawFs;
     }
 
     /**
      * [Boot: Mount]
-     * 外部から提供されたハンドルを使ってファイルシステムを構成する。
-     * @param handleRoot ルート(/)としてマウントするディレクトリハンドル
-     * @param handleBoot (Optional) /boot としてマウントするディレクトリハンドル
+     * Configure the filesystem using externally provided handles.
+     * @param handleRoot Directory handle to mount as root (/)
+     * @param handleBoot (Optional) Directory handle to mount as /boot
      */
     public async mount(handleRoot: FileSystemDirectoryHandle, handleBoot?: FileSystemDirectoryHandle): Promise<void> {
         try {
-            console.log('📂 [FileSystem] Mounting handles provided by Bootloader...');
+            console.log('[FileSystem] Mounting handles provided by Bootloader...');
 
             const mounts: Record<string, any> = {
                 '/': {
@@ -88,23 +88,23 @@ export class FileSystemManager implements IFileSystem {
                 };
             }
 
-            // ZenFS にマウント構成を適用
+            // Apply mount configuration to ZenFS
             await configure({ mounts });
             
-            console.log(`📂 [FileSystem] Mounted. (Boot partition: ${handleBoot ? 'Yes' : 'No'})`);
+            console.log(`[FileSystem] Mounted. (Boot partition: ${handleBoot ? 'Yes' : 'No'})`);
 
-            // 必須ディレクトリの確保
+            // Ensure essential directories exist
             await this.ensureDir('/home/geek');
             await this.ensureDir('/usr/bin');
             await this.ensureDir('/tmp');
 
         } catch (e: any) {
-            console.error('📂 [FileSystem] Mount Error:', e);
+            console.error('[FileSystem] Mount Error:', e);
             throw e;
         }
     }
 
-    // --- 以下、パス操作ロジックは変更なし ---
+    // --- Path operations logic remains unchanged ---
 
     public resolvePath(pathInput: string, baseDir: string = this.env.get(EnvKey.CWD)): string {
         if (pathInput.startsWith('/')) return this.normalize(pathInput);
@@ -159,7 +159,7 @@ export class FileSystemManager implements IFileSystem {
 
     /**
      * [SysCall: Unlink]
-     * 指定されたパスのファイルを削除する (git diff の後片付けなどで使用)
+     * Delete file at specified path (used for git diff cleanup, etc.)
      */
     public async unlink(pathTarget: string): Promise<void> {
         const pathResolved = this.resolvePath(pathTarget);
@@ -217,10 +217,10 @@ export class FileSystemManager implements IFileSystem {
 
     /**
      * [SysCall: Open]
-     * 指定されたパスを開き、FileStreamラッパーを返す。
-     * @param pathTarget パス
-     * @param flags フラグ
-     * @param bufferSize (Optional) ストリームの内部バッファサイズ
+     * Open specified path and return FileStream wrapper.
+     * @param pathTarget Path
+     * @param flags Flags
+     * @param bufferSize (Optional) Internal buffer size of the stream
      */
     public async open(pathTarget: string, flags: string, bufferSize?: number): Promise<IFileStream> {
         const pathResolved = this.resolvePath(pathTarget);
@@ -233,7 +233,7 @@ export class FileSystemManager implements IFileSystem {
                     //this.touchFile(pathResolved);
                 } catch (e) { }
             }
-            // 生ハンドルを取得
+            // Get raw handle
             const rawHandle = await fsPromises.open(pathResolved, flags);
             let initialCursor = 0;
             if (flags.includes('a')) {
@@ -241,15 +241,15 @@ export class FileSystemManager implements IFileSystem {
                     const stat = await rawHandle.stat();
                     initialCursor = stat.size;
                 } catch (e) {
-                    // 新規作成時などは0のままでOK
+                    // 0 is fine for newly created files, etc.
                 }
             }
 
-            // FileStreamを生成
+            // Create FileStream
             const stream = new FileStream(rawHandle, bufferSize);
             stream.setWriteCursor(initialCursor);
 
-            // bufferSize が undefined なら、FileStream 側のデフォルト(64KB)が使われる
+            // If bufferSize is undefined, FileStream default (64KB) is used
             return stream;
         } catch (e: any) {
             throw new Error(`FileSystem: Cannot open '${pathTarget}': ${e.message}`);

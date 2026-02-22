@@ -19,38 +19,38 @@ import { IStdinStream, IStdoutStream, StreamData, StreamDataType, TTYMode } from
 
 
 /**
- * ReadableStream<string> と ReadableStream<Uint8Array> を統一的に扱うラッパー。
- * 要件:
+ * Wrapper to handle ReadableStream<string> and ReadableStream<Uint8Array> uniformly.
+ * Requirements:
  * 1. constructor(readable, StdinStream.UINT8ARRAY | StdinStream.STRING)
- * 2. getByteReader() / getStringReader() を提供
- * 3. 必要な場合のみ Encoder/Decoder をパイプする
+ * 2. Provide getByteReader() and getStringReader()
+ * 3. Pipe Encoder/Decoder only when necessary
  */
 export class StdinStream implements IStdinStream {
-    // 要件: StdinStream.UINT8ARRAY / STRING でアクセス可能にする定数
+    // Requirement: Constants for StdinStream.UINT8ARRAY / STRING access
     static readonly UINT8ARRAY = StreamData.Uint8Array;
     static readonly STRING = StreamData.String;
 
     /**
-     * 保持する元のストリーム。
+     * Internal reference to the source stream.
      * Application Hungarian: rs (ReadableStream)
      */
     private rsSource: ReadableStream<string | Uint8Array>;
 
     /**
-     * 元ストリームのデータ種別。
+     * Data type of the source stream.
      * Application Hungarian: kind (Enum: Number)
      */
     private kindSource: StreamDataType;
 
     public readonly isTTY: boolean;
-    // ✨ Update Callback Signature
+    // Update Callback Signature
     private fnSetMode?: (mode: TTYMode) => Promise<void>;
 
     constructor(
         rsSource: ReadableStream<string> | ReadableStream<Uint8Array>,
         kindSource: StreamDataType,
         isTTY: boolean = false,
-        fnSetMode?: (mode: TTYMode) => Promise<void> // ✨ Update
+        fnSetMode?: (mode: TTYMode) => Promise<void> // Update
     ) {
         this.rsSource = rsSource as ReadableStream<string | Uint8Array>;
         this.kindSource = kindSource;
@@ -58,35 +58,35 @@ export class StdinStream implements IStdinStream {
         this.fnSetMode = fnSetMode;
     }
 
-    // ✨ Update Method
+    // Update Method
     public async setMode(mode: TTYMode): Promise<void> {
         if (!this.isTTY || !this.fnSetMode) return;
         await this.fnSetMode(mode);
     }
 
     /**
-     * ✨ Interrupt 実装
-     * ロックされている場合でも stream.cancel() は有効。
-     * これにより、reader.read() で待機している箇所が reason で Reject される。
+     * Interrupt implementation
+     * stream.cancel() remains effective even when locked.
+     * Pending reader.read() calls will reject with the provided reason.
      */
     public async interrupt(reason?: any): Promise<void> {
         try {
-            // ReadableStream には cancel() がある
+            // ReadableStream has cancel() method
             await this.rsSource.cancel(reason);
         } catch (e) {
-            // すでに閉じている場合などは無視
+            // Ignore if already closed or similar cases
         }
     }
 
     /**
      * バイト列 (Uint8Array) として読むための Reader を取得する。
-     * 元が String の場合のみ EncoderStream をパイプする。
+     * Pipe through EncoderStream only if the source is String.
      */
     public getByteReader(): ReadableStreamDefaultReader<Uint8Array> {
         this.assertNotLocked();
 
         if (this.kindSource === StreamData.Uint8Array) {
-            // A. No Conversion: そのまま返す
+            // A. No Conversion: Return as is
             return (this.rsSource as ReadableStream<Uint8Array>).getReader();
         } else {
             // B. Conversion: String -> Uint8Array (Encode)
@@ -99,8 +99,8 @@ export class StdinStream implements IStdinStream {
 
     /**
      * 文字列 (string) として読むための Reader を取得する。
-     * 修正: pipeThroughを使うと元ストリームがロックされたままになるため、
-     * 手動でByteReaderを取得し、ラップしてデコードする。
+     * Fix: pipeThrough keeps the source stream locked;
+     * manually acquire ByteReader and wrap it for decoding.
      */
     public getStringReader(): ReadableStreamDefaultReader<string> {
         this.assertNotLocked();
@@ -110,25 +110,25 @@ export class StdinStream implements IStdinStream {
         } else {
             // B. Conversion: Uint8Array -> String (Decode Manually)
             
-            // 1. 元のストリームのバイトReaderを取得（これでロックする）
+            // 1. Acquire the ByteReader of the source stream (locking it).
             const byteReader = (this.rsSource as ReadableStream<Uint8Array>).getReader();
             const decoder = new TextDecoder();
 
-            // 2. Readerインターフェースを偽装したプロキシオブジェクトを作成
+            // 2. Create a proxy object mimicking the Reader interface.
             return {
                 read: async (): Promise<ReadableStreamReadResult<string>> => {
                     const result = await byteReader.read();
                     if (result.done) {
                         return { done: true, value: undefined };
                     }
-                    // バイトをデコードして返す ({stream: true} でマルチバイト分断に対応)
+                    // Decode bytes and return (handles multi-byte splitting with {stream: true})
                     const strValue = decoder.decode(result.value, { stream: true });
                     return { done: false, value: strValue };
                 },
                 releaseLock: () => {
-                    // ★ここが最重要！
-                    // ラッパーが解放されたら、裏にある本当のReaderも解放して、
-                    // シェルにストリームを返してあげる。
+                    // [Crucial!]
+                    // When the wrapper is released, release the underlying Reader as well,
+                    // returning the stream to the shell.
                     byteReader.releaseLock();
                 },
                 cancel: async (reason?: any) => {
@@ -140,7 +140,7 @@ export class StdinStream implements IStdinStream {
     }
 
     /**
-     * ロック状態のチェック
+     * Check the lock status
      */
     private assertNotLocked(): void {
         if (this.rsSource.locked) {
@@ -151,24 +151,24 @@ export class StdinStream implements IStdinStream {
 
 
 /**
- * WritableStream<string> と WritableStream<Uint8Array> を統一的に扱うラッパー。
- * * 出力先（Destination）が何を受け取るかをコンストラクタで宣言し、
- * 書き込み側（Writer）が「バイトで書きたい」か「文字列で書きたい」かに応じて
- * 必要なら自動的に Encoder/Decoder を挟んで接続する。
+ * Wrapper to handle WritableStream<string> and WritableStream<Uint8Array> uniformly.
+ * * * Declares what the destination receives in the constructor,
+ * * and depending on whether the writer wants to write in bytes or strings,
+ * * it automatically connects by inserting an Encoder/Decoder if necessary.
  */
 export class StdoutStream implements IStdoutStream{
-    // 定数エイリアス
+    // Constant aliases
     static readonly UINT8ARRAY = StreamData.Uint8Array;
     static readonly STRING = StreamData.String;
 
     /**
-     * 書き込み先のストリーム（Destination）。
+     * Destination stream.
      * Application Hungarian: ws (WritableStream)
      */
     private wsDest: WritableStream<string | Uint8Array>;
 
     /**
-     * 出力先が受け取るデータ種別。
+     * Data type received by the destination.
      * Application Hungarian: kind (Enum: Number)
      */
     private kindDest: StreamDataType;
@@ -187,21 +187,21 @@ export class StdoutStream implements IStdoutStream{
 
 
     /**
-     * ✨ Interrupt 実装
-     * stream.abort() を呼ぶと、writer.write() で待機している箇所が reason で Reject される。
+     * Interrupt implementation
+     * Calling stream.abort() rejects pending writer.write() with the reason.
      */
     public async interrupt(reason?: any): Promise<void> {
         try {
-            // WritableStream には abort() がある
+            // WritableStream has abort() method
             await this.wsDest.abort(reason);
         } catch (e) {
-            // 無視
+            // Ignore
         }
     }
     
     /**
      * バイト列 (Uint8Array) を書き込むための Writer を取得する。
-     * 出力先が String の場合のみ、書き込んだバイトをデコードして流すパイプを作る。
+     * Create a pipe that decodes written bytes only if the destination is a String.
      */
     public getByteWriter(): WritableStreamDefaultWriter<Uint8Array> {
         this.assertNotLocked();
@@ -211,21 +211,21 @@ export class StdoutStream implements IStdoutStream{
             return (this.wsDest as WritableStream<Uint8Array>).getWriter();
         } else {
             // B. [Writer: Byte] -> (Decoder) -> [Dest: String]
-            // 出力先が文字列を求めているのに、バイトを書き込みたい場合
+            // Case: Destination expects string, but we want to write bytes
             const tsDecoder = new TextDecoderStream();
             
-            // 変換ストリームの出口を、本来の出力先に繋ぐ
+            // Connect the outlet of the transform stream to the actual destination
             tsDecoder.readable.pipeTo(this.wsDest as WritableStream<string>)
                 .catch(e => console.error("StdoutStream Pipe Error:", e));
             
-            // 変換ストリームの入り口(Writer)を返す
+            // Return the inlet (Writer) of the transform stream
             return tsDecoder.writable.getWriter() as WritableStreamDefaultWriter<Uint8Array>;
         }
     }
 
     /**
      * 文字列 (string) を書き込むための Writer を取得する。
-     * 出力先が Uint8Array の場合のみ、書き込んだ文字をエンコードして流すパイプを作る。
+     * Create a pipe that encodes written characters only if the destination is a Uint8Array.
      */
     public getStringWriter(): WritableStreamDefaultWriter<string> {
         this.assertNotLocked();
@@ -235,7 +235,7 @@ export class StdoutStream implements IStdoutStream{
             return (this.wsDest as WritableStream<string>).getWriter();
         } else {
             // B. [Writer: String] -> (Encoder) -> [Dest: Byte]
-            // 出力先がバイトを求めているのに、文字列を書き込みたい場合
+            // Case: Destination expects bytes, but we want to write strings
             const tsEncoder = new TextEncoderStream();
             
             tsEncoder.readable.pipeTo(this.wsDest as WritableStream<Uint8Array>)
@@ -246,7 +246,7 @@ export class StdoutStream implements IStdoutStream{
     }
 
     /**
-     * ロック状態のチェック
+     * Check the lock status
      */
     private assertNotLocked(): void {
         if (this.wsDest.locked) {

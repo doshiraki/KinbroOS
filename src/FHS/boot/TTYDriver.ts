@@ -59,8 +59,8 @@ export class TTYDriver {
     }
 
     /**
-     * ✨ [Revised] 本格的な Line Discipline 実装
-     * 制御文字の可視化と適切なバックスペース処理を行う
+     * [Revised] Professional Line Discipline implementation
+     * Visualize control characters and handle backspaces properly
      */
     private async handleCookedInput(char: string) {
         const code = char.charCodeAt(0);
@@ -70,58 +70,58 @@ export class TTYDriver {
         if (code === 0x03) { 
             await this.echoString('^C\r\n');
             
-            // Kernelへの通知 (論理削除)
+            // Notify Kernel (Logical deletion)
             if (this.onSignal) this.onSignal(this.pgidForeground, 2); 
 
-            // 🌟 追加: ストリームへの通知 (物理切断)
-            // これをやらないと、read() で待ってるプロセスが永遠に起きない！
+            // [Added]: Notify stream (Physical disconnection)
+            // Otherwise, processes waiting in read() will hang forever!
             const controller = this.mapPgidToCtl.get(this.pgidForeground);
             if (controller) {
                 try {
-                    // "Interrupted System Call" 相当のエラーを投げる
+                    // Throw error equivalent to "Interrupted System Call"
                     controller.error(new Error("Interrupted"));
                 } catch(e) {}
                 
-                // マップから削除 (ストリームはもう使えない)
+                // Remove from map (Input channel for this PGID is gone)
                 this.mapPgidToCtl.delete(this.pgidForeground);
             }
 
             this.lineBuffer = '';
             return;
         }
-        // 🌟 追加: Ctrl+Z (0x1A) - Job Suspend
+        // [Added]: Ctrl+Z (0x1A) - Job Suspend
         else if (code === 0x1a) {
             await this.echoString('^Z\r\n');
 
-            // Kernelへ通知 (SIGTSTP = 20)
+            // Notify Kernel (SIGTSTP = 20)
             if (this.onSignal) this.onSignal(this.pgidForeground, 20);
 
-            // ストリームへの通知は... しない！
-            // なぜなら、プロセスを「エラー終了」させたいわけではなく、
-            // 「入力待ちのまま凍結」させたいからだ。
-            // 物理的な切断はせず、単にシェルに制御を戻すきっかけを作る。
+            // Do NOT notify the stream!
+            // We don't want to "error out" the process;
+            // we want to "freeze" it while it is waiting for input.
+            // Instead of physical disconnection, just trigger a return of control to the shell.
             
             this.lineBuffer = '';
             return;
         }
-        // 🌟 追加実装: Ctrl+D (EOT) - EOF Handling
+        // [Added Implementation]: Ctrl+D (EOT) - EOF Handling
         else if (code === 0x04) {
             console.log(`[TTY:Cooked] Ctrl+D detected. BufferLen:${this.lineBuffer.length} FG:${this.pgidForeground}`);
-            // ケースA: 入力途中の文字があるなら、それを確定させる (Flush)
+            // Case A: If there is partial input, flush/commit it (Commit)
             if (this.lineBuffer.length > 0) {
                 this.emitToForeground(this.lineBuffer);
                 this.lineBuffer = '';
             } 
-            // ケースB: 入力が空なら、EOFとしてストリームを閉じる
+            // Case B: If input is empty, close the stream as EOF
             else {
                 const controller = this.mapPgidToCtl.get(this.pgidForeground);
                 if (controller) {
                     try {
-                        // ストリームを正常に閉じる
+                        // Close the stream normally
                         controller.close();
                     } catch(e) {}
                     
-                    // マップから削除 (このPGID用の入力チャネルは消滅)
+                    // Remove from map (Input channel for this PGID is gone)
                     this.mapPgidToCtl.delete(this.pgidForeground);
                 }
             }
@@ -131,13 +131,13 @@ export class TTYDriver {
         // 2. Editing (BackSpace / DEL)
         else if (code === 0x7f || code === 0x08) { 
             if (this.lineBuffer.length > 0) {
-                 // 消去する文字を取得
+                 // Get the character to be deleted
                  const charToDelete = this.lineBuffer.slice(-1);
                  this.lineBuffer = this.lineBuffer.slice(0, -1);
                  
-                 // 画面上の消去処理
-                 // 削除する文字が制御文字だった場合、画面上では "^A" のように2文字使っている
-                 // なので2文字分消す必要がある。
+                 // Screen erasure processing
+                 // If deleted char is a control char, it takes 2 chars (e.g., "^A") on screen
+                 // Therefore, 2 characters must be erased.
                  const eraseWidth = this.calcDisplayWidth(charToDelete);
                  await this.echoBackspace(eraseWidth);
             }
@@ -146,9 +146,9 @@ export class TTYDriver {
 
         // 3. Normal Processing
         // Enter (\r)
-        if (char === '\r' || char === '\n') { // 両対応
+        if (char === '\r' || char === '\n') { // Support both CR and LF
              await this.echoString('\r\n');
-             this.lineBuffer += '\n'; // アプリには \n で渡すのが一般的
+             this.lineBuffer += '\n'; // Generally passed as to the application
              this.emitToForeground(this.lineBuffer);
              this.lineBuffer = '';
              return;
@@ -156,30 +156,30 @@ export class TTYDriver {
         
         // 4. Echo Back with Caret Notation
         if (code < 32) {
-             // 制御文字 (\t, \n 以外) は ^X 表記でエコーする
+             // Echo control chars (except \t, \n) in ^X notation
              if (char === '\t' || char === '\n') {
                  await this.echoString(char);
                  this.lineBuffer += char;
              } else {
-                 // 例: \x01 (Ctrl+A) -> '^' + 'A'
+                 // Example: \x01 (Ctrl+A) -> "^" + "A"
                  const caret = '^' + String.fromCharCode(code + 64);
                  await this.echoString(caret);
                  this.lineBuffer += char; 
              }
         } else {
-             // 通常文字
+             // Ordinary character
              await this.echoString(char);
              this.lineBuffer += char;
         }
     }
 
     /**
-     * [Helper] 指定した幅だけバックスペース処理を行う
-     * カーソルを戻し、空白で上書きし、再度戻す
+     * [Helper] Perform backspace for a specified width
+     * Move cursor back, overwrite with space, and move back again
      */
     private async echoBackspace(width: number) {
         if (!this.writerEcho) return;
-        // 例: width=2 なら "\b\b  \b\b"
+        // Example: width=2 -> "$8$8  $8$8"
         const bs = '\b'.repeat(width);
         const space = ' '.repeat(width);
         const seq = bs + space + bs;
@@ -187,7 +187,7 @@ export class TTYDriver {
     }
 
     /**
-     * [Helper] 文字列をエコーバック
+     * [Helper] Echo back the string
      */
     private async echoString(str: string) {
         if (this.writerEcho) {
@@ -196,22 +196,22 @@ export class TTYDriver {
     }
 
     /**
-     * [Helper] 文字が画面上で何文字幅を使うか計算
+     * [Helper] Calculate character width on screen
      */
     private calcDisplayWidth(char: string): number {
         const code = char.charCodeAt(0);
         if (code < 32) {
-            if (char === '\t') return 1; // 本当はタブ位置計算が必要だが簡易的に1
-            if (char === '\n') return 0; // 改行は幅なし
-            return 2; // ^A などは2文字
+            if (char === '\t') return 1; // Ideally needs tab position calculation, but simplified to 1
+            if (char === '\n') return 0; // Newline has no width
+            return 2; // ^A, etc. take 2 chars
         }
-        // 本来は全角半角判定(wcwidth)が必要だが、今回は1文字=1幅とする
+        // Ideally requires wcwidth check, but treated as 1 width here
         return 1;
     }
 
     private emitToForeground(data: string) {
-// 🕵️‍♀️ [Debug Log] 入力データの送信先
-        // dataが制御文字ならコード表示、それ以外なら文字そのものを表示
+// [Debug Log] Destination of input data
+        // Display code if control char, otherwise display char itself
         const debugData = data.length === 1 ? `Code:${data.charCodeAt(0)}` : `"${data.replace(/\n/g, '\\n')}"`;
         console.log(`[TTY:Input] Sending ${debugData} -> PGID:${this.pgidForeground}`);
 
@@ -219,7 +219,7 @@ export class TTYDriver {
         if (controller) {
             try { controller.enqueue(data); } catch (e) {}
         } else {
-            // 🕵️‍♀️ [Debug Log] 送り先不在！
+            // [Debug Log] Destination missing!
             console.warn(`[TTY:Warn] No controller found for PGID:${this.pgidForeground} (Data lost)`);
         }
     }

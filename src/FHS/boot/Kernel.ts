@@ -29,19 +29,19 @@ export class KinbroKernel implements SystemAPI{
     private cntNextPid: number = 1;
     private readonly mapProcessTable: Map<number, Process> = new Map();
 
-    // 🌟 Router: グローバルFSマップと連携
+    // [Router] Collaborates with global VFS map
     private routerUrl: string | null = null;
     private readonly mapBlobs: Record<string, string> = {}; // Path -> BlobURL
 
     private readonly mapSessions: Map<number, TTYDriver> = new Map();
     constructor() {
 
-        // コンストラクタでRouter起動
+        // Initialize Router in constructor
         LinkerDetective.init();
     }
 
     
-    // ✨ Update Method
+    // [Update Method]
     public setTTYMode(sessionPid: number, mode: TTYMode): void {
         const tty = this.mapSessions.get(sessionPid);
         if (tty) tty.setMode(mode);
@@ -49,8 +49,8 @@ export class KinbroKernel implements SystemAPI{
 
 
     /**
-     * [Updated] セッション作成
-     * IStdinStream / IStdoutStream を受け取り、それをアダプター経由で TTY に接続する
+     * [Updated] Create session
+     * Receives IStdinStream \/ IStdoutStream and connects to TTY via adapter
      */
     public createSession(sessionPid: number, stdin: IStdinStream, stdout: IStdoutStream): void {
         const tty = new TTYDriver(sessionPid, sessionPid);
@@ -58,13 +58,13 @@ export class KinbroKernel implements SystemAPI{
             this.signalForeground(sessionPid, signal);
         };
 
-        // 🌟 IStream -> ReadableStream/WritableStream Adapter
-        // TTYDriver は生の Stream を欲しがるので、IStream からデータを吸い出して渡す
+        // \[IO Adapter\] IStream to Web Streams adapter
+        // TTYDriver requires raw streams; extract data from IStream and forward it
         
         const rsPhysicalIn = new ReadableStream({
             async pull(controller) {
                 try {
-                    // IStdinStream から読み取って TTY に流す
+                    // Read from IStdinStream and pipe to TTY
                     const reader = stdin.getByteReader();
                     const { value, done } = await reader.read();
                     if (done) controller.close();
@@ -76,7 +76,7 @@ export class KinbroKernel implements SystemAPI{
 
         const wsPhysicalOut = new WritableStream({
             async write(chunk) {
-                // TTY からの出力 (Echo等) を IStdoutStream に流す
+                // Pipe TTY output (Echo, etc.) to IStdoutStream
                 const writer = stdout.getByteWriter();
                 await writer.write(chunk);
                 writer.releaseLock();
@@ -90,7 +90,7 @@ export class KinbroKernel implements SystemAPI{
 
     // --- Job Control API ---
     
-    // カーネルへの問い合わせも一本化されたマップを見るだけ
+    // Kernel queries only need to check the unified map
     public getForegroundPgid(sessionPid: number): number | null {
         return this.mapSessions.get(sessionPid)?.pgidForeground ?? null;
     }
@@ -99,38 +99,38 @@ export class KinbroKernel implements SystemAPI{
         const tty = this.mapSessions.get(sessionPid);
         if (!tty) return;
 
-        tty.pgidForeground = pgid; // TTYのターゲットを切り替え
+        tty.pgidForeground = pgid; // Switch TTY target
 
-        // ✨ モダンUNIXの客観的制御
+        // \[Job Control\] Objective control for modern UNIX
         const shellProc = this.mapProcessTable.get(sessionPid);
         if (shellProc) {
             if (pgid !== sessionPid) {
-                shellProc.setState(ProcessState.SUSPENDED); // 子がFGなら親はサスペンド
+                shellProc.setState(ProcessState.SUSPENDED); // Suspend parent if child is in foreground
                 console.log(`[Kernel] Shell(${sessionPid}) is now SUSPENDED.`);
             } else {
-                shellProc.setState(ProcessState.RUNNING); // 権限が戻れば親は実行中に
+                shellProc.setState(ProcessState.RUNNING); // Resume parent when control is returned
                 console.log(`[Kernel] Shell(${sessionPid}) is now RUNNING.`);
             }
         }
     }
 
-    // 「このシェル(sessionPid)から Ctrl+C が来たぞ！ そこの主役を殺せ！」
+    // "Ctrl+C from this shell (sessionPid)! Terminate the foreground process!"
     public signalForeground(sessionPid: number, signal: number = 9) {
         const { pgidForeground: targetPgid } = this.mapSessions.get(sessionPid)!;
         
-        if (!targetPgid) return; // 主役不在なら何もしない
+        if (!targetPgid) return; // Do nothing if no foreground process
         
-        console.log(`[Kernel] ⚡ Signal(${signal}) -> Session:${sessionPid} / Target PGID:${targetPgid}`);
+        console.log(`[Kernel] Signal(${signal}) -> Session:${sessionPid} / Target PGID:${targetPgid}`);
         
-        // 🌟 SIGTSTP (Ctrl+Z) の場合
+        // [Signal] For SIGTSTP (Ctrl+Z)
         if (signal === 20) {
-            // 対象PGIDの全プロセスを探してサスペンド通知
+            // Notify suspend to all processes in target PGID
             for (const proc of this.mapProcessTable.values()) {
                 if (proc.pgid === targetPgid) {
-                    // プロセス自体に「止まれ」と伝えるメソッドが必要だが、
-                    // 今回は簡易的に「Kernelが勝手にwaitを解く」アプローチを取る。
+                    // Requires a method to tell the process to "stop",
+                    // but using a simple "Kernel forces wait release" approach for now.
                     
-                    // ※ Process型にモンキーパッチされた suspend() を呼ぶ想定
+                    // * Assumes suspend() is monkey-patched into Process
                     if ((proc as any).suspend) {
                         (proc as any).suspend();
                     }
@@ -138,7 +138,7 @@ export class KinbroKernel implements SystemAPI{
             }
             return;
         }
-        // 全プロセス走査
+        // Iterate all processes
         for (const proc of this.mapProcessTable.values()) {
             if (proc.pgid === targetPgid) {
                 try {
@@ -157,39 +157,39 @@ export class KinbroKernel implements SystemAPI{
     }
     /**
      * [Boot Sequence]
-     * BIOSから渡されたハンドル情報を使ってシステムを起動する。
-     * @param handles BIOSが用意したファイルシステムハンドル
+     * Boot the system using handles provided by the BIOS.
+     * @param handles Filesystem handles prepared by the BIOS
      */
     public async boot(proc: IProcess,handles: { root: FileSystemDirectoryHandle, boot?: FileSystemDirectoryHandle }): Promise<void> {
         console.log('[Kernel] Booting with injected VFS handles...');
         
-        // ハンドルを使ってマウント実行 (具体的なパスはKernelは知らなくていい)
+        // Execute mount using handles (Kernel abstracts the path)
         await proc.fs.mount(handles.root, handles.boot);
         
         console.log('[Kernel] FileSystem mounted.');
     }
 
     /**
-     * [New Helper] 指定されたパスに実行可能ファイルがあるか、拡張子を変えて確認する
-     * @param fs ファイルシステム
-     * @param strPathBase 拡張子なし(かもしれない)パス
-     * @returns 発見された完全パス (なければ null)
+     * [New Helper] Check for executable at path by trying extensions
+     * @param fs File system
+     * @param strPathBase Path without extension (potentially)
+     * @returns Found full path (or null)
      */
     private async findExecutable(fs: IFileSystem, strPathBase: string): Promise<string | null> {
-        // ここで探索する拡張子を定義。優先順位順。
+        // Define extensions to search here, in order of priority.
         const arrExtensions = ["", ".js"]; 
         
         for (const ext of arrExtensions) {
             const strTrial = strPathBase + ext;
             if (await fs.exists(strTrial)) {
-                return strTrial; // 見つけた！
+                return strTrial; // Found!
             }
         }
         return null;
     }
 
     /**
-     * [API] 非同期プロセス起動 (IProcessを即座に返す)
+     * [API] Async process spawn (returns IProcess immediately)
      */
     public async startProcess(
         parentProc: IProcess,
@@ -200,7 +200,7 @@ export class KinbroKernel implements SystemAPI{
         options?: { pgid?: number, newGroup?: boolean, newSession?: boolean }
     ): Promise<IProcess> {
 
-        // 1. パス解決 (前回と同じ)
+        // 1. Path resolution (same as before)
         let strPathExec: string | null = null;
         if (strPathExecCandidate.includes('/')) {
             const absCandidate = parentProc.fs.resolvePath(strPathExecCandidate);
@@ -216,7 +216,7 @@ export class KinbroKernel implements SystemAPI{
 
         if (!strPathExec) throw new Error(`Kernel: Command not found: ${strPathExecCandidate}`);
 
-        // 2. モジュールロード (依存関係解決)
+        // 2. Module loading (dependency resolution)
         const loadInfo = await this.importWithDependencies(parentProc, strPathExec);
         
         if (typeof loadInfo.module.main !== 'function') {
@@ -224,13 +224,13 @@ export class KinbroKernel implements SystemAPI{
             throw new Error(`Kernel: ${strPathExec} has no exported 'main' function.`);
         }
 
-        // 3. Spawn (シンプル！)
+        // 3. Spawn (Simple!)
         const proc = this.spawn(
             parentProc,
             strPathExec, 
             async (p) => {
-                // ここで try-finally しなくても良くなる！
-                // 純粋に main を実行するだけ
+                // No need for try-finally here!
+                // Just execute main
                 return await loadInfo.module.main(arrArgs, this, p);
             },
             isToCopyEnv,
@@ -238,8 +238,8 @@ export class KinbroKernel implements SystemAPI{
             options
         );
 
-        // 🌟 4. リソース解放を「予約」する
-        // プロセスが exit/kill されたら自動的に参照カウントを減らす
+        // [Resource] 4. Schedule resource cleanup
+        // Automatically decrement reference count on process exit/kill
         proc.addCleanupHook(() => {
             console.log(`[Kernel] Releasing resources for process ${proc.pid}`);
             LinkerDetective.removeReferences(loadInfo.imports);
@@ -257,21 +257,21 @@ export class KinbroKernel implements SystemAPI{
         options?: { pgid?: number, newGroup?: boolean, newSession?: boolean }
     ): Promise<number> {
 
-        // startProcess に委譲して待つだけ
+        // Just delegate to startProcess and wait
         const proc = await this.startProcess(parentProc, strPathExecCandidate, arrArgs, isToCopyEnv, ioRedirect, options);
         return await proc.wait();
     }
 
     /**
      * [Logic: Import With Dependencies]
-     * ソースコードを再帰的に走査し、依存関係を全てBlob化してImportMapで解決させる。
-     * @param pathEntry エントリーポイントのファイルパス (絶対パス)
+     * Recursively scan source code and resolve all dependencies via ImportMap blobs.
+     * @param pathEntry Entry point file path (absolute)
      */
     private async importWithDependencies(parentProc: IProcess, pathEntry: string): Promise<{ "module": any, "imports": Set<string>}> {
         console.log(`[Kernel] Dynamic Import: Resolving dependencies for ${pathEntry}...`);
         const setProcesses = await LinkerDetective.sourceTransform(parentProc.fs, pathEntry);
 
-        // 3. エントリーポイントをインポート
+        // 3. Import entry point
         console.log(pathEntry);
         const module = await import(/* @vite-ignore */LinkerDetective.getBlobUrl(pathEntry)!);
         return {module: module, imports: setProcesses};
@@ -294,43 +294,43 @@ export class KinbroKernel implements SystemAPI{
 
         let sessionPid = 0;
         
-        // I/Oの準備
+        // Prepare I/O
         let streamIn = ioConfig?.stdin;
         let streamOut = ioConfig?.stdout;
-        const streamErr = ioConfig?.stderr; // stderrは別ストリームなので共有不要
+        const streamErr = ioConfig?.stderr; // stderr is separate; no sharing needed
 
-        // 🌟 修正: newSession ブロックを統合し、Shared Writer パターンを適用
+        // [Fix] Merged newSession blocks and applied Shared Writer pattern
         if (options?.newSession) {
             sessionPid = pid;
-            const physicalOut = ioConfig?.stdout; // 物理画面出力
+            const physicalOut = ioConfig?.stdout; // Physical screen output
 
             if (ioConfig?.stdin && physicalOut) {
-                // ✨ 1. 物理出力を「永続的」にロックする (Shared Writer)
-                // getByteWriter() を一度だけ呼び、その writer インスタンスを TTY とプロセスで使い回す。
-                // これにより getWriter() の競合エラー(Locked)を物理的に回避する。
+                // 1. Lock physical output permanently (Shared Writer)
+                // Call getByteWriter() once and share the instance between TTY and process.
+                // Prevents "Locked" errors by avoiding concurrent getWriter() calls.
                 const sharedWriter = physicalOut.getByteWriter();
 
-                // 🔌 2. TTY用ブリッジ (Echo用)
+                // [Bridge] 2. TTY Bridge (for Echo)
                 const wsForTTY = new WritableStream({
                     async write(chunk) {
-                        // 確保済みの writer に書き込む (並列呼び出しも安全にキューイングされる)
+                        // Write to pre-allocated writer (parallel calls are safely queued)
                         await sharedWriter.write(chunk);
                     },
-                    close() { /* sharedWriterは閉じない (プロセスが生きているかもしれない) */ }
+                    close() { /* sharedWriter remains open (process might be alive) */ }
                 });
 
-                // 🔌 3. プロセス用ブリッジ (Shell出力用)
+                // [Bridge] 3. Process Bridge (for Shell output)
                 const wsForProcess = new WritableStream({
                     async write(chunk) {
                         await sharedWriter.write(chunk);
                     },
-                    close() { /* sharedWriterは閉じない (kibtermが閉じるまで維持) */ }
+                    close() { /* sharedWriter remains open (maintained until kibterm closes) */ }
                 });
 
-                // 4. セッション作成 (TTYには専用ブリッジを渡す)
+                // 4. Create session (pass dedicated bridge to TTY)
                 this.createSession(sessionPid, ioConfig.stdin, new StdoutStream(wsForTTY, StreamData.Uint8Array));
                 
-                // 5. プロセス用ストリームを更新 (共有ブリッジを渡す)
+                // 5. Update process streams (pass shared bridge)
                 streamOut = new StdoutStream(wsForProcess, StreamData.Uint8Array);
             }
 
@@ -345,7 +345,7 @@ export class KinbroKernel implements SystemAPI{
 
         const tty = this.mapSessions.get(sessionPid);
         
-        // 🌟 3. Input Hijack (入力の競合回避)
+        // 3. Input Hijack (Avoid input conflict)
         if (tty && (options?.newSession || !streamIn)) {
             const rsTTY = tty.createStreamFor(targetPgid);
             
@@ -356,7 +356,7 @@ export class KinbroKernel implements SystemAPI{
                 async (mode: TTYMode) => { tty.setMode(mode); }
             );
             
-            // ioConfig を更新
+            // Update ioConfig
             if (ioConfig) {
                 ioConfig.stdin = streamIn;
                 ioConfig.stdout = streamOut; 
@@ -389,7 +389,7 @@ export class KinbroKernel implements SystemAPI{
                 try {
                     const writer = proc.stderr?.getStringWriter();
                     if (writer) {
-                        // メッセージ末尾の改行など
+                        // Line endings, etc.
                         await writer.write(`\nKernel Panic (Process ${pid}): ${err.message || err}\n`).catch(() => {});
                         writer.releaseLock();
                     }
@@ -406,25 +406,25 @@ export class KinbroKernel implements SystemAPI{
     private exitProcess(pid: number, code: number): void {
         const proc = this.mapProcessTable.get(pid);
         if (!proc) return;
-        // 🌟 お掃除ロジックを追加
-        // ✨ [Phase 3: 終焉] 削除前に TERMINATED を確定
+        // [Cleanup] Added cleanup logic
+        // [Phase 3: Termination] Set state to TERMINATED before deletion
         proc.exit(code);
                 
         const sessionPid = Number(proc.env.get('SESSION_PID') || 0);
         const tty = this.mapSessions.get(sessionPid);
         if (tty) {
-            // このプロセスのグループ ID を TTY から登録解除する
+            // Unregister this process group ID from the TTY
             tty.cleanup(proc.pgid);
             console.log(`[Kernel] TTY Cleanup for PGID: ${proc.pgid}`);
         }
 
-        // 3. ✨ オートリターン判定
-        // 自身が属していたグループに、もう生きているプロセスがいないか確認
+        // 3. Auto-return check
+        // Check if other alive processes exist in the same group
         const remaining = this.getProcessesInGroup(proc.pgid);
         if (remaining.length === 0) {
             console.log(`[Kernel] Group ${proc.pgid} has terminated.`);
             
-            // もしこのグループがフォアグラウンドだったなら、シェルに権限を戻す
+            // If foreground, return control to shell
             if (this.getForegroundPgid(sessionPid) === proc.pgid) {
                 console.log(`[Kernel] Auto-returning foreground to Shell(${sessionPid})`);
                 this.setForegroundPgid(sessionPid, sessionPid);
@@ -435,15 +435,15 @@ export class KinbroKernel implements SystemAPI{
         console.log(`[Kernel:Exit] PID:${pid} (${proc.name}) Code:${code} PGID:${proc.pgid}`);    }
 
     public panic(err: Error): void {
-        console.error('🔥 KERNEL PANIC 🔥');
+        console.error('!!! KERNEL PANIC !!!');
         console.error(err);
     }
     public createArchiver(proc: IProcess): IArchiver {
-        return new Archiver(proc.fs); // プロセスのFSコンテキストを渡して生成 [cite: 385, 526]
+        return new Archiver(proc.fs); // Generate using process FS context
     }
 
     /**
-     * 指定したPGIDに属する「生きている」プロセスをすべて取得
+     * Get all "alive" processes belonging to specified PGID
      */
     public getProcessesInGroup(pgid: number): Process[] {
         return Array.from(this.mapProcessTable.values())

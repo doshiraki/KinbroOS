@@ -27,7 +27,7 @@ export async function main() {
     const proc = sys.createInitProcess();
     await initFileSystem(proc.fs);
     // 2. Install Base System Check
-    if (!await proc.fs.exists('/usr/bin/kibsh.js') || !confirm(`KinbroOSのインストールが見つかりました。\n\n[OK] KinbroOSを起動\n[キャンセル] 新しいKinbroOSをインストールして起動`)) {
+    if (!await proc.fs.exists('/usr/bin/kibsh.js') || !confirm(`KinbroOS installation found.\n[OK] Launch KinbroOS\n[Cancel] Install new KinbroOS and launch`)) {
         console.log("Kernel: System not found. Starting Installer...");
         await promptAndInstallRootFS(proc.fs);
         console.log("Kernel: Installation Complete.");
@@ -43,20 +43,20 @@ export async function main() {
         await sys.execPath(proc, pathInit, []);
     } catch (e: any) {
         console.error("Kernel Panic: Failed to launch init process.", e);
-        // 【修正 1】innerHTML を廃止して安全に要素を追加 
+        // [Fix 1] Deprecated innerHTML and added elements safely 
         const h1 = document.createElement('h1');
         h1.style.color = 'red';
         h1.textContent = 'Kernel Panic';
         
         const p = document.createElement('p');
-        p.textContent = String(e); // エラー内容をテキストとして安全に表示
+        p.textContent = String(e); // Display error details safely as text
 
         document.body.appendChild(h1);
         document.body.appendChild(p);
     }
 }
 
-// ... initFileSystem は変更なし ...
+// ... initFileSystem remains unchanged ...
 async function initFileSystem(fs:IFileSystem) {
     try {
         const rootHandle = await navigator.storage.getDirectory();
@@ -71,7 +71,7 @@ async function initFileSystem(fs:IFileSystem) {
 }
 
 /**
- * ファイルピッカーを開き、Archiverを使って展開する
+ * Open file picker and extract using Archiver
  */
 async function promptAndInstallRootFS(fs:IFileSystem) {
     return new Promise<void>((resolve, reject) => {
@@ -84,7 +84,7 @@ async function promptAndInstallRootFS(fs:IFileSystem) {
             zIndex: '99999', fontFamily: 'monospace'
         });
 
-        // 【修正 2】innerHTML を廃止し、DOMツリーを構築 
+        // [Fix 2] Deprecated innerHTML and constructed DOM tree 
         // <h1>KinbroOS Installer</h1>
         const h1 = document.createElement('h1');
         h1.textContent = 'KinbroOS Installer';
@@ -113,13 +113,13 @@ async function promptAndInstallRootFS(fs:IFileSystem) {
         status.style.marginTop = '20px';
         status.style.color = 'yellow';
 
-        // 要素をオーバーレイに追加
+        // Add elements to overlay
         installOverlay.append(h1, p1, p2, input, status);
         document.body.appendChild(installOverlay);
 
         const archiver = new Archiver(fs);
         
-        // イベントリスナーも input 変数を直接参照できるので getElementById 不要
+        // Event listener can directly reference input variable, so getElementById is unnecessary
         input.onchange = async () => {
             if (!input.files || input.files.length === 0) return;
             const file = input.files[0];
