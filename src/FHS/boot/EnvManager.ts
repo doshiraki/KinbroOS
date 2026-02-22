@@ -18,49 +18,49 @@ import { IEnvManager, EnvKey, EnvKeyType } from '../../dev/types/IEnvManager';
 
 /**
  * [Class: EnvManager]
- * 環境変数を管理するクラス。
- * システムグローバルなインスタンスは永続化(localStorage)され、
- * 子プロセス用のインスタンスはインメモリで動作する。
+ * Class for managing environment variables.
+ * System-global instances are persisted (localStorage),
+ * while child process instances operate in-memory.
  */
 export class EnvManager implements IEnvManager {
     private readonly strNamespace = 'ms_env_';
-    private readonly mapCache: Map<string, string> = new Map(); // Key型をstringに緩和
+    private readonly mapCache: Map<string, string> = new Map(); // Relax Key type to string
     
-    // 永続化するかどうかのフラグ (子プロセス用はfalseにする)
+    // Persistence flag (set to false for child processes)
     private readonly isPersistent: boolean;
 
     /**
-     * @param initialData 初期データ (clone用)
-     * @param isPersistent localStorageに保存するか (Default: true)
+     * @param initialData Initial data (for cloning)
+     * @param isPersistent Whether to save to localStorage (Default: true)
      */
     constructor(initialData?: Record<string, string>, isPersistent: boolean = false) {
         this.isPersistent = window["localStorage"] && isPersistent;
 
         if (initialData) {
-            // クローン作成時: 渡されたデータをセット
+            // When creating clone: Set provided data
             for (const [key, val] of Object.entries(initialData)) {
                 this.mapCache.set(key, val);
             }
         } else {
-            // 新規作成時 (System): デフォルト値をロード
+            // When creating new (System): Load default values
             this.initDefaults();
         }
     }
 
     /**
-     * 環境変数を取得
+     * Get environment variable
      */
     public get(strKey: string): string {
         return this.mapCache.get(strKey) || '';
     }
 
     /**
-     * 環境変数を設定
+     * Set environment variable
      */
     public set(strKey: string, strValue: string): void {
         this.mapCache.set(strKey, strValue);
         
-        // 永続化モードの場合のみストレージに書き込む
+        // Write to storage only in persistent mode
         if (this.isPersistent) {
             const strStorageKey = this.strNamespace + strKey;
             localStorage.setItem(strStorageKey, strValue);
@@ -68,7 +68,7 @@ export class EnvManager implements IEnvManager {
     }
 
     /**
-     * 環境変数を削除
+     * Delete environment variable
      */
     public unset(strKey: string): void {
         this.mapCache.delete(strKey);
@@ -79,7 +79,7 @@ export class EnvManager implements IEnvManager {
     }
 
     /**
-     * 全リスト取得 (export用)
+     * Get full list (for export)
      */
     public listAll(): Record<string, string> {
         const objEnv: Record<string, string> = {};
@@ -90,20 +90,20 @@ export class EnvManager implements IEnvManager {
     }
 
     /**
-     * [New] クローン作成 (for Child Process)
-     * 現在の状態をコピーした、非永続的(In-Memory)なインスタンスを返す。
+     * [New] Clone creation (for Child Process)
+     * Returns a non-persistent (In-Memory) instance copying the current state.
      */
     public clone(): IEnvManager {
-        // 自分自身のコピーを渡し、isPersistent=false で作成
+        // Create with isPersistent=false, passing a copy of self
         return new EnvManager(this.listAll());
     }
 
     /**
      * [Internal: Init]
-     * システム起動時のデフォルト値ロード
+     * Load default values at system boot
      */
     private initDefaults(): void {
-        // localStorage から既存の値を復元 (永続化モード時のみ)
+        // Restore existing values from localStorage (Persistent mode only)
         if (this.isPersistent) {
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
@@ -115,7 +115,7 @@ export class EnvManager implements IEnvManager {
             }
         }
 
-        // 必須変数の確保 (なければセット)
+        // Ensure essential variables exist (Set if missing)
         const ensure = (key: string, val: string) => {
             if (!this.mapCache.has(key)) {
                 this.set(key, val);

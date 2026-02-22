@@ -45,20 +45,20 @@ export class LinkerDetective {
         const blobUrl = LinkerDetective.getBlobUrl(path);
         if (blobUrl == null) throw new Error("[Router] 404: " + argUrl);
         
-        // 実体をロードして返す
+        // Load the entity and return it
         return await import(/* @vite-ignore */blobUrl);
     }
     public static async sourceTransform(fs:IFileSystem, pathEntry:string):Promise<Set<string>> {
         const setProcessed = new Set<string>();
 
-        // 内部関数: 再帰的にファイルを読み込み、importを書き換える
+        // Internal function: Recursively read files and rewrite imports
         const processFile = async (pathCurrent: string) => {
             if (setProcessed.has(pathCurrent)) return;
             setProcessed.add(pathCurrent);
             console.log(pathCurrent);
 
             // ファイル読み込み (テキストとして取得)
-            // ※ FileSystem.ts の readFile が string を返すと仮定
+            // * Assumes FileSystem.ts readFile returns a string
             //   もし Uint8Array なら TextDecoder で変換が必要だよ
             let srcContent = await fs.readFile(pathCurrent);
             if (typeof srcContent !== 'string') {
@@ -68,16 +68,16 @@ export class LinkerDetective {
 
             const dirCurrent = pathCurrent.substring(0, pathCurrent.lastIndexOf('/'));
         
-            // 🌟 1. Regexの改善
-            // "from" の前は「' " ;」以外、パス部分は「' " ;」以外とすることで
-            // バックトラックを減らし、かつセミコロン等の境界を厳密にする
+            // [1] Regex improvement
+            // By excluding quotes/semicolons before "from" and in path parts,
+            // backtracking is reduced and boundaries like semicolons are strictly enforced.
             const regexImport = /import\s*(?:([^'";]*?)\s*from\s*)?['"]((?:\/|\.\.?\/)[^'";]+)['"]?/g;
 
-            // 🌟 2. StringBuilderパターン (Array push -> join)
+            // [2] StringBuilder pattern (Array push -> join)
             const parts: string[] = [];
             let cursor = 0;
         
-            // 依存関係を再帰的に解決するためのリスト
+            // List for recursively resolving dependencies
             const dependencies: string[] = [];
 
             for (const match of srcContent.matchAll(regexImport)) {
@@ -85,14 +85,14 @@ export class LinkerDetective {
                 const matchIndex = match.index!;
             
                 console.log("full:" + fullMatch);
-                // マッチした箇所の「手前」にあるコードをそのままpush
+                // Push code "before" the match as is
                 parts.push(srcContent.slice(cursor, matchIndex));
             
-                // パス解決
+                // Path resolution
                 const absPath = fs.resolvePath(relPath, dirCurrent);
                 dependencies.push(absPath); // 後で再帰処理するためにメモ
 
-                // 書き換えコード生成
+                // Generate rewritten code
                 const routerPath = `${LinkerDetective.routerUrl}#path=${encodeURIComponent(absPath)}`;
                 const routerExpr = `(await import('${routerPath}')).default`;
 
@@ -107,25 +107,25 @@ export class LinkerDetective {
 
                 parts.push(newCode);
             
-                // カーソルを進める
+                // Advance cursor
                 cursor = matchIndex + fullMatch.length;
             }
 
-            // 最後のマッチ以降の残りコードをpush
+            // Push remaining code after the last match
             parts.push(srcContent.slice(cursor));
 
-            // 結合！ (これが一番速い)
+            // Join! (This is the fastest method)
             const srcModified = parts.join('');
 
-            // 依存ファイルの再帰読み込み (文字列操作が終わってからやる)
-            // ※並列実行(Promise.all)もできるけど、順序依存がある場合は直列で。今回は直列で安全に。
+            // Recursive loading of dependencies (after string operations)
+            // * Parallel (Promise.all) is possible, but we use sequential execution for safety.
             for (const depPath of dependencies) {
                 if (await fs.exists(depPath)) {
                     await processFile(depPath);
                 }
             }
 
-            // Blob化
+            // Convert to Blob URL
             const blob = new Blob([srcModified], { type: 'application/javascript' });
             const blobUrl = URL.createObjectURL(blob);
             let cnt = 0;
@@ -138,7 +138,7 @@ export class LinkerDetective {
             LinkerDetective.mapping[pathCurrent] = { blobURL: blobUrl, referenceCount: cnt };
  
         }
-        // 1. 依存関係ツリーの構築開始
+        // 1. Start building dependency tree
         await processFile(fs.resolvePath(pathEntry));
         LinkerDetective.addReferences(setProcessed);
         return setProcessed;
@@ -148,14 +148,14 @@ export class LinkerDetective {
         for (let path of paths) {
             mapping[path].referenceCount += incremant;
 
-            // ✨ 追加: 参照カウントが0以下になったら物理削除 (GC)
+            // [Added]: Physical deletion (GC) when reference count reaches 0 or less
             if (mapping[path].referenceCount <= 0) {
                 console.log(`[Linker] GC: Revoking ${path}`);
                 
-                // 1. ブラウザのメモリからBlobを解放
+                // 1. Release Blob from browser memory
                 URL.revokeObjectURL(mapping[path].blobURL);
                 
-                // 2. マップからエントリを削除
+                // 2. Remove entry from map
                 delete mapping[path];
             }
         }

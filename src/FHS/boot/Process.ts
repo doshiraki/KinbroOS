@@ -16,8 +16,8 @@
 
 /**
  * [Class: Process]
- * 実行中のプログラムの状態（I/O と Lifecycle）を管理するコンテナ。
- * Promise制御（wait/kill）と Web Streams（stdin/out/err）を統合する。
+ * Container that manages the state (I/O and Lifecycle) of a running program.
+ * Integrates Promise control (wait/kill) and Web Streams (stdin/out/err).
  */
 import { IEnvManager } from '@/dev/types/IEnvManager';
 import { SignalError, IResource } from '../../dev/types/IProcess';
@@ -49,20 +49,20 @@ export class Process implements IProcess {
     public readonly stderr?: IStdoutStream;
 
     // --- 3. Lifecycle Management (Promise Control) ---
-    // プロセスの終了を待機するためのPromise
+    // Promise to wait for process termination
     private readonly promCompletion: Promise<number>;
     
-    // 外部からPromiseを完了させるためのトリガー (Deferred Pattern)
+    // Trigger to complete Promise externally (Deferred Pattern)
     // Application Hungarian: 'fn' (Function)
     private fnResolve!: (code: number) => void;
     private fnReject!: (reason: any) => void;
 
-    // 🌟 2. 閉店作業リスト (同期フック + 非同期リソース)
+    // 🌟 2. Cleanup task list (Synchronous hooks + Async resources)
     private readonly listCleanupHooks: (() => void)[] = [];
     private readonly listResources: IResource[] = [];
 
     /**
-     * @param streams 親から継承、または新規作成されたストリーム
+     * @param streams Streams inherited from parent or newly created
      */
     constructor(
         parentProc: IProcess|null,
@@ -81,30 +81,30 @@ export class Process implements IProcess {
         this.name = name;
         this.env = env;
         this.fs = new FileSystemManager(env);
-        // --- PGID 決定ロジック ---
+        // --- PGID Determination Logic ---
         if (options?.newGroup) {
-            // 「新しい党を立ち上げる！」（自分がリーダー）
+            // "Starting a new party!" (I am the leader)
             this.pgid = pid;
         } else if (options?.pgid !== undefined) {
-            // 「指定された派閥に入ります」
+            // "Joining a specified faction"
             this.pgid = options.pgid;
         } else if (parentProc) {
-            // 「親の七光りです」（親と同じ派閥）
+            // "Relying on parent's prestige" (Same faction as parent)
             this.pgid = parentProc.pgid;
         } else {
-            // 「私が始祖です」（initプロセスなど）
+            // "I am the progenitor" (e.g., init process)
             this.pgid = pid;
         }
         console.log(`[Process:New] I am '${this.name}' (PID:${this.pid}). My Leader is PGID:${this.pgid}`);
-        // I/O のセットアップ
+        // I/O setup
         if (streams) {
             this.stdin = streams.stdin;
             this.stdout = streams.stdout;
             this.stderr = streams.stderr;    
         }
 
-        // Lifecycle Promise の初期化
-        // コンストラクタ内で即座に resolve/reject をキャプチャする
+        // Lifecycle Promise initialization
+        // Capture resolve/reject immediately within the constructor
         this.promCompletion = new Promise<number>((resolve, reject) => {
             this.fnResolve = resolve;
             this.fnReject = reject;
@@ -112,25 +112,25 @@ export class Process implements IProcess {
     }
 
     /**
-         * [New] 終了時に実行したい処理を登録する
+         * [New] Register functions to be executed upon termination
          */
     public addCleanupHook(fn: () => void): void {
         this.listCleanupHooks.push(fn);
     }
 
     /**
-     * [New] このプロセスが所有するリソース（ファイルストリーム等）を登録する
-     * ここに登録されたものは、exit時に自動的に close() が待機される。
+     * [New] Register resources owned by this process (e.g., file streams)
+     * Items registered here are automatically awaited for close() upon exit.
      */
     public addResource(res: IResource): void {
         this.listResources.push(res);
     }
 
     /**
-     * [Internal] フックの一括実行
+     * [Internal] Batch execution of hooks
      */
     private executeCleanupHooks(): void {
-        // 逆順（登録が新しい順）に実行するのが一般的だが、今回は順序問わず
+        // Executing in reverse order (newest first) is standard, but order doesn't matter here
         while (this.listCleanupHooks.length > 0) {
             const fn = this.listCleanupHooks.pop();
             if (fn) {
@@ -140,16 +140,16 @@ export class Process implements IProcess {
     }
 
     /**
-     * [Internal] リソースの解放とFlush待ち (非同期)
+     * [Internal] Resource release and wait for Flush (Async)
      */
     private async cleanupAsync(): Promise<void> {
 
-        // 同期フックを先に実行
+        // Execute synchronous hooks first
         this.executeCleanupHooks();
 
         /*
-        // 登録されたリソースを全て閉じる (順次実行で安全に)
-        // これにより FileStream.close() -> flush() が完了するまで待機が発生する
+        // Close all registered resources (sequentially for safety)
+        // This waits until FileStream.close() -> flush() is complete
         for (const res of this.listResources) {
             try {
                 await res.close();
@@ -161,8 +161,8 @@ export class Process implements IProcess {
 
     /**
      * [Lifecycle: Wait]
-     * プロセスが終了するまで待機する (親プロセスやカーネルが呼ぶ)
-     * @returns 終了コード (Exit Code)
+          * Wait until the process terminates (called by parent or kernel)
+          * @returns Exit Code
      */
     public async wait(): Promise<number> {
         return this.promCompletion;
@@ -170,48 +170,48 @@ export class Process implements IProcess {
 
     /**
      * [Lifecycle: Exit]
-     * プロセスを正常/異常終了させる (プロセス自身やカーネルが呼ぶ)
-     * @param code 終了コード (0=Success, >0=Error)
+          * Terminate the process normally or abnormally (called by process itself or kernel)
+          * @param code Exit code (0=Success, >0=Error)
      */
     public exit(code: number): void {
         if (this.state === ProcessState.TERMINATED) return;
         
-        // まずステータスを変える（二重終了防止）
+        // Change status first (to prevent double termination)
         this.state = ProcessState.TERMINATED;
 
-        // 🌟 3. 非同期クリーンアップの実行
+        // 🌟 3. Execute asynchronous cleanup
         // (Fire-and-forgetではなく、Promiseチェーンの中で解決する)
         this.cleanupAsync().then(() => {
-            // 全てのFlushが終わって初めて、親プロセス(waitしてる人)に通知が行く
+            // Notify the parent process (the waiter) only after all Flushes are done
             this.fnResolve(code);
         }).catch((err) => {
             console.error(`[Process] Cleanup failed for PID:${this.pid}`, err);
-            // 失敗しても親を待たせ続けるわけにはいかないので解決する
+            // Resolve anyway even on failure, as we cannot keep the parent waiting forever
             this.fnResolve(code);
         });
     }
 
     /**
      * [Lifecycle: Kill]
-     * プロセスを強制終了させる (killコマンドなどが呼ぶ)
-     * @param signal シグナル番号 (本来は番号だが、JSのエラーとして扱う)
+          * Forcefully terminate the process (called by kill command, etc.)
+          * @param signal Signal number (handled as JS Error)
      */
     public kill(signal: number = 9): void {
-        // 強制終了時でも、可能な限りリソース解放を試みる
-        // ただし kill は即時性が求められるため、await せずにバックグラウンドで走らせる手もあるが
-        // ここでは安全側に倒して cleanupAsync を呼んでから resolve する (exitと同じフロー)
+        // Attempt to release resources even during forced termination
+        // While kill requires immediacy, background execution is an option, but...
+        // we play it safe here by awaiting cleanupAsync before resolving (same flow as exit)
         
         if (this.state === ProcessState.TERMINATED) return;
         this.state = ProcessState.TERMINATED;
 
-        // I/O待ちで寝ているプロセスを叩き起こす
+        // Wake up processes sleeping in I/O wait
         const reason = new SignalError(signal);
         this.stdin?.interrupt(reason).catch(() => {});
         this.stdout?.interrupt(reason).catch(() => {});
         this.stderr?.interrupt(reason).catch(() => {});
 
         this.cleanupAsync().then(() => {
-             // 🌟 2. 変更: 一般的なErrorではなくSignalErrorでRejectする
+             // 🌟 2. Changed: Reject with SignalError instead of a generic Error
             this.fnResolve(128 + signal);
         }).catch(() => {
             this.fnResolve(128 + signal);

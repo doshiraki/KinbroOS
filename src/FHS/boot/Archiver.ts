@@ -18,7 +18,7 @@ import { fs } from '@zenfs/core';
 import { IFileSystem } from '@/dev/types/IFileSystem';
 import { IArchiver, ITarEntry } from '@/dev/types/IArchiver';
 
-// 🌟 Enum: ヘッダー内のオフセット位置を定義 (意味の明確化)
+// Enum: Define offset positions in the header for clarity
 enum TarOffset {
     Name = 0,
     Mode = 100,
@@ -32,15 +32,15 @@ enum TarOffset {
 
 /**
  * [Kernel Module: Archiver (GNU/Modern Edition)]
- * .tar.gz の展開と作成、リスト表示を担当する。
- * GNU LongLink拡張に対応し、100バイトを超える長いパスや
- * マルチバイト文字を含むパスを正しくストリーム処理する。
+ * Responsible for extraction, creation, and listing of .tar.gz files.
+ * Supports GNU LongLink extensions, handling paths exceeding 100 bytes
+ * and correctly stream-processing paths containing multi-byte characters.
  */
 export class Archiver implements IArchiver{
     constructor(private fsManager: IFileSystem) {}
 
     /**
-     * 📦 解凍: .tar.gz (Stream/Uint8Array) を指定ディレクトリに展開
+     * Extraction: Extract .tar.gz (Stream/Uint8Array) to specified directory
      */
     public async extract(source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>, destDir: string = '/'): Promise<void> {
         console.log(`[Archiver] Extracting stream to ${destDir} (GNU Supported)...`);
@@ -57,7 +57,7 @@ export class Archiver implements IArchiver{
             const fullPath = (destDir === '/' ? '' : destDir) + '/' + header.name;
 
             if (header.type === '5') {
-                // 📂 ディレクトリ
+                // Directory
                 await this.fsManager.makeDir(fullPath, true);
             } else {
                 try {
@@ -66,7 +66,7 @@ export class Archiver implements IArchiver{
                     }
                     //this.touchFile(pathResolved);
                 } catch (e) { }
-                // 📄 ファイル ('0' or '\0')
+                // File ('0' or '\0')
                 const parentDir = fullPath.substring(0, fullPath.lastIndexOf('/'));
                 if (parentDir) await this.fsManager.makeDir(parentDir, true);
 
@@ -81,27 +81,27 @@ export class Archiver implements IArchiver{
     }
 
     /**
-     * 📜 リスト: アーカイブ内のファイル一覧を表示 (展開しない)
+     * List: Show file list in the archive (do not extract)
      */
     public async list(
             source: Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>,
             onEntry: (entry: ITarEntry) => Promise<void>
     ): Promise<void> {
         const srcStream = this.normalizeStream(source);
-        // gzipかどうかの判定は本来ヘッダを見るべきだけど、一旦既存ロジックを踏襲
+        // Header check for gzip is ideal, but following existing logic for now
         const gunzipStream = srcStream.pipeThrough(new DecompressionStream('gzip') as any) as ReadableStream<Uint8Array>;
 
         await this.processTarStream(gunzipStream, async (entry, buffer) => {
-            // コールバックに構造化データを渡す
+            // Pass structured data to callback
             await onEntry(entry);
-            // 本体データは読み飛ばす
+            // Skip body data
             await this.pipeToNone(buffer, entry.size);
         });
     }
 
     /**
-     * 🎁 圧縮: 指定パス群を .tar.gz ストリームとして返す
-     * Multiple Sources 対応版
+     * Compression: Returns specified paths as a .tar.gz stream
+     * Multiple Sources supported version
      */
     public archive(sourcePaths: string[]): ReadableStream<Uint8Array> {
         console.log(`[Archiver] Archiving ${sourcePaths.length} sources...`);
@@ -128,7 +128,7 @@ export class Archiver implements IArchiver{
     }
 
     // ========================================================================
-    // 🕵️‍♀️ Private: Unified Tar Stream Processor
+    // Private: Unified Tar Stream Processor
     // ========================================================================
 
     private async processTarStream(
@@ -139,7 +139,7 @@ export class Archiver implements IArchiver{
         const buffer = new StreamBuffer(reader);
         const dec = new TextDecoder();
 
-        // GNU LongLink用の状態保持変数
+        // State variables for GNU LongLink
         let strNextLongName: string | null = null;
 
         while (true) {
@@ -205,7 +205,7 @@ export class Archiver implements IArchiver{
 
     private async pipeToNone(buffer: StreamBuffer, size: number): Promise<void> {
         let remaining = size;
-        const CHUNK_SIZE = 64 * 1024; // 64KBずつ捨てる
+        const CHUNK_SIZE = 64 * 1024; // Discard 64KB at a time
 
         while (remaining > 0) {
             const readSize = Math.min(remaining, CHUNK_SIZE);
@@ -217,8 +217,8 @@ export class Archiver implements IArchiver{
     }
 
     private async pipeToFile(buffer: StreamBuffer, path: string, size: number): Promise<void> {
-        // Raw FS Stream を使う (Userland互換のため)
-        // ※ 本来は fsManager.open() 経由推奨だが、書き込み速度優先でNode互換APIを使用
+        // Uses Raw FS Stream (for Userland compatibility)
+        // Note: fsManager.open() is recommended, but Node-compatible API is used for write speed priority.
         const writeStream = fs.createWriteStream(path);
         let remaining = size;
         
@@ -235,7 +235,7 @@ export class Archiver implements IArchiver{
     }
 
     // ========================================================================
-    // 📦 Private: Tar Creation Logic
+    // Private: Tar Creation Logic
     // ========================================================================
 
     private async streamTar(sourcePaths: string[], controller: ReadableStreamDefaultController<Uint8Array>): Promise<void> {
@@ -243,7 +243,7 @@ export class Archiver implements IArchiver{
         
         for (const rootPath of sourcePaths) {
             try {
-                // 絶対パス化されている前提だが、もし相対ならFSが解決する
+                // Assumes absolute path, but FS resolves if relative
                 const stat = await this.fsManager.getStat(rootPath);
                 let files: string[] = [];
                 
@@ -255,10 +255,10 @@ export class Archiver implements IArchiver{
 
                 for (const path of files) {
                     try {
-                        // 🌟 エントリ名決定ロジック
-                        // 常に「先頭の / を除去したフルパス」をエントリ名とする
-                        // 例: /home/geek/file -> home/geek/file
-                        // これにより、複数指定時も構造が維持される
+                        // Entry name determination logic
+                        // Always use the full path without the leading slash as the entry name
+                        // Example: /home/geek/file -> home/geek/file
+                        // This maintains the structure even when multiple sources are specified
                         let entryName = path;
                         if (entryName.startsWith('/')) entryName = entryName.slice(1);
                         
@@ -355,7 +355,7 @@ class StreamBuffer {
         let cntOffset = 0;
 
         while (cntOffset < cntSize) {
-            // 内部バッファが空なら補充する
+            // Replenish if internal buffer is empty
             if (this.chunks.length === 0) {
                 const { done, value } = await this.reader.read();
                 if (done) break; 
@@ -372,22 +372,22 @@ class StreamBuffer {
             const cntAvailable = srcChunk.byteLength;
 
             if (cntAvailable <= cntRemainingNeeded) {
-                // チャンク丸ごとコピー
+                // Copy entire chunk
                 dstBuffer.set(srcChunk, cntOffset);
                 cntOffset += cntAvailable;
                 this.totalBytes -= cntAvailable;
-                this.chunks.shift(); // 使い切ったので削除
+                this.chunks.shift(); // Remove used chunk
             } else {
-                // チャンクの一部だけコピー
+                // Copy partial chunk
                 dstBuffer.set(srcChunk.subarray(0, cntRemainingNeeded), cntOffset);
-                // 残った分をチャンクに戻す
+                // Return remaining to chunk
                 this.chunks[0] = srcChunk.subarray(cntRemainingNeeded);
                 cntOffset += cntRemainingNeeded;
                 this.totalBytes -= cntRemainingNeeded;
             }
         }
 
-        // 指定サイズに満たなかった場合は null を返す（ファイル末尾など）
+        // Returns null if specified size is not met (e.g., end of stream)
         if (cntOffset < cntSize) {
             console.warn(`[Archiver] Unexpected end of stream. Expected ${cntSize}, got ${cntOffset}`);
             return null;

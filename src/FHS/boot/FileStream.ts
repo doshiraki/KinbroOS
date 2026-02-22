@@ -21,19 +21,19 @@ import { promises as fs, Stats } from '@zenfs/core';
 
 /**
  * [Class: FileStream]
- * カーネル内部のファイルハンドルをラップし、
- * 高速な読み込み(Ring Buffer)と効率的な書き込み(Linear Buffer)を提供する。
+ * Wraps internal kernel file handles,
+ * providing fast reading (Ring Buffer) and efficient writing (Linear Buffer).
  * * [Architecture: Read (Ring Buffer)]
  * File -> [ Head ... Data ... Tail ] -> UserBuffer
  * ^ Write           ^ Read
- * * 1. 内部に固定長リングバッファを持ち、ファイルからデータを先読み(Fill)する。
- * 2. ユーザーにはリングバッファのコピー(またはView)を渡し、Zero-copyに近い性能を出す。
- * 3. ReadPolicy.Exact により、「必要なバイト数が揃うまで待つ」挙動も選択可能。
+ * * 1. Uses an internal fixed-length ring buffer to pre-read (Fill) data from files.
+ * 2. Passes a copy (or View) of the ring buffer to the user, achieving near zero-copy performance.
+ * 3. ReadPolicy.Exact allows choosing the behavior to "wait until required bytes are available".
  * * [Architecture: Write (Linear Buffer & Flush)]
  * UserData -> [ Buffer ... ] -> (Flush) -> File
- * * 1. 小さな書き込みは内部バッファに溜め込み(Accumulate)、システムコール回数を減らす。
- * 2. バッファが溢れるか、明示的に flush() された時にディスクへ書き込む。
- * 3. autoFlush: true の場合はバッファをスルーして直接ディスクへ書く(ログ用途など)。
+ * * 1. Accumulates small writes in the internal buffer to reduce system calls.
+ * 2. Writes to disk when the buffer overflows or is explicitly flush()ed.
+ * 3. autoFlush: true bypasses the buffer and writes directly to disk (e.g., for logging).
  */
 export class FileStream implements IFileStream {
     private readonly hFile: fs.FileHandle;
@@ -41,7 +41,7 @@ export class FileStream implements IFileStream {
     // ==========================================
     // Read Context (Ring Buffer)
     // ==========================================
-    // 読み込みは「過去のデータを保持し、切れ目なく提供する」ためリングバッファを採用
+    // Uses a ring buffer for reading to retain past data and provide it seamlessly.
     private readonly bufReadRing: Uint8Array;
     private readonly limReadRing: number;
     private idxReadHead: number = 0; // File -> Ring (Write Pointer)
@@ -49,14 +49,14 @@ export class FileStream implements IFileStream {
     private cntReadValid: number = 0;
     
     // User Attached Buffer (Read Only)
-    // 読み込み先としてユーザーから預かったバッファとその状態
+    // User-provided buffer for reading and its state
     private bufUserRead: Uint8Array | null = null;
     private idxUserReadCursor: number = 0;
 
     // ==========================================
     // Write Context (Linear Buffer)
     // ==========================================
-    // 書き込みは「溜めて一気に吐き出す」ためシンプルかつ高速なリニアバッファを採用
+    // Uses a simple and fast linear buffer for writing to accumulate and flush all at once.
     private readonly bufWrite: Uint8Array;
     private readonly limWrite: number;
     private idxWriteCursor: number = 0;
@@ -69,14 +69,14 @@ export class FileStream implements IFileStream {
         autoFlush: false 
     };
 
-    // ファイルポインタ (OS側のカーソル位置を管理)
+    // File pointer (manages OS-side cursor position)
     private idxFilePosRead: number = 0;
     private idxFilePosWrite: number = 0;
     private isEof: boolean = false;
 
     /**
-     * @param handle ファイルハンドル
-     * @param sizeBuffer 内部バッファサイズ (Read/Write個別にこのサイズで確保される。デフォルト64KB)
+     * @param handle File handle
+     * @param sizeBuffer Internal buffer size (Allocated separately for Read/Write. Default 64KB)
      */
     constructor(handle: fs.FileHandle, sizeBuffer: number = 64 * 1024) {
         this.hFile = handle;
@@ -91,14 +91,14 @@ export class FileStream implements IFileStream {
     }
 
     /**
-     * 設定の更新
+     * Update configuration
      */
     public config(options: StreamConfig): void {
         this.optCurrent = { ...this.optCurrent, ...options };
     }
 
     /**
-     * 読み込み用バッファのアタッチ
+     * Attach read buffer
      */
     public attach(buffer: Uint8Array): void {
         this.bufUserRead = buffer;
@@ -113,15 +113,15 @@ export class FileStream implements IFileStream {
             throw new Error("BufferNotAttached: Please call attach() before reading.");
         }
 
-        // 1. バッファ残量の計算
+        // 1. Calculate remaining buffer capacity
         // Application Hungarian: cnt (Count), rem (Remaining)
         const cntBufferRem = this.bufUserRead.byteLength - this.idxUserReadCursor;
         
-        // 要求サイズ (指定なしなら残り全部埋める気概で)
+        // Requested size (Fill all remaining if unspecified)
         const cntReq = cntLength === undefined ? cntBufferRem : cntLength;
 
-        // 2. オーバーフロー判定 (ここが改修のキモ！)
-        // 「これ以上積めない」状態での呼び出し、または「要求量が残量を超えた」場合はエラー
+        // 2. Overflow check (Crucial modification point!)
+        // Error if called when "cannot accumulate more" or if requested amount exceeds remaining capacity
         if (cntBufferRem === 0 || cntReq > cntBufferRem) {
             throw new Error("BufferOverflow: User buffer is full or insufficient space.");
         }
@@ -130,16 +130,16 @@ export class FileStream implements IFileStream {
             return { cntRead: 0, data: new Uint8Array(0) };
         }
 
-        // --- 以下、リングバッファからの転送ロジック (既存ロジックを流用しつつ調整) ---
+        // --- Ring buffer transfer logic (Adjusting existing logic) ---
 
         let cntRemainingToRead = cntReq;
         let cntTotalRead = 0;
         
-        // 今回の書き込み開始位置を記憶
+        // Remember write start position for this operation
         const idxStart = this.idxUserReadCursor;
 
         while (cntRemainingToRead > 0) {
-            // A. バッファ補充 (Ring Bufferが空ならファイルから吸う)
+            // A. Buffer replenishment (Draw from file if Ring Buffer is empty)
             if (this.cntReadValid === 0) {
                 if (this.isEof) break;
                 
@@ -147,34 +147,34 @@ export class FileStream implements IFileStream {
                 if (filled === 0) break; // EOF
             }
 
-            // B. 転送 (Ring -> User Buffer)
+            // B. Transfer (Ring -> User Buffer)
             const cntCopy = Math.min(cntRemainingToRead, this.cntReadValid);
             this.copyRingToUser(this.idxUserReadCursor, cntCopy);
 
-            // C. カーソル & カウンタ更新
+            // C. Update cursor & counter
             this.idxReadTail = (this.idxReadTail + cntCopy) % this.limReadRing;
             this.cntReadValid -= cntCopy;
             
-            this.idxUserReadCursor += cntCopy; // ★積み上げ: ユーザーバッファのカーソルを進める
+            this.idxUserReadCursor += cntCopy; // [Accumulate]: Advance user buffer cursor
             
             cntRemainingToRead -= cntCopy;
             cntTotalRead += cntCopy;
 
-            // D. Partial Policy: データが少しでも取れたら即リターン (ブロッキング回避)
+            // D. Partial Policy: Return immediately if any data is retrieved (Avoid blocking)
             if (this.optCurrent.readPolicy === ReadPolicy.Partial && this.cntReadValid === 0) {
-                // まだ要求量に達していなくても、リングバッファが空になった時点で一旦返す
-                // (次回のreadで続きを読めば良い)
+                // Return once ring buffer is empty, even if requested amount is not met
+                // (Can read the rest in the next read call)
                 break; 
             }
         }
 
-        // Exact Policy Check: 要求量を満たせなかったらエラー (構造体読み込みなどで使う)
+        // Exact Policy Check: Error if requested amount is not met (used for struct reading, etc.)
         if (this.optCurrent.readPolicy === ReadPolicy.Exact && cntTotalRead < cntReq) {
              throw new Error(`UnexpectedEOF: Expected ${cntReq} bytes, but only got ${cntTotalRead}.`);
         }
 
-        // 3. 結果の切り出し (SubArray)
-        // メモリコピーせず、積み上げた部分だけのViewを返す
+        // 3. Extract result (SubArray)
+        // Return a View of the accumulated portion without memory copying
         const subResult = this.bufUserRead.subarray(idxStart, this.idxUserReadCursor);
 
         return {
@@ -190,17 +190,17 @@ export class FileStream implements IFileStream {
         let offsetSrc = 0;
         let remaining = data.byteLength;
 
-        // リニアバッファへの書き込みループ
+        // Write loop to linear buffer
         while (remaining > 0) {
             const available = this.limWrite - this.idxWriteCursor;
 
-            // バッファがいっぱいなら、今ある分を吐き出して空にする
+            // If buffer is full, flush existing contents to empty it
             if (available === 0) {
                 await this.flush();
                 continue; 
             }
 
-            // バッファに詰め込めるだけ詰め込む
+            // Pack as much data as possible into the buffer
             const toWrite = Math.min(remaining, available);
             this.bufWrite.set(data.subarray(offsetSrc, offsetSrc + toWrite), this.idxWriteCursor);
 
@@ -210,30 +210,30 @@ export class FileStream implements IFileStream {
         }
 
         // [Auto Flush]
-        // 「前回分ではなく、今回分を即flushする」
-        // バッファに書き込んだデータを、即座にディスクへ永続化する
+        // "Flush the current data immediately, not the previous data"
+        // Persist the data written to the buffer immediately to disk
         if (this.optCurrent.autoFlush) {
             await this.flush();
         }
     }
 
     /**
-     * 書き込みバッファの強制排出
+     * Force flush write buffer
      */
     public async flush(): Promise<void> {
-        if (this.idxWriteCursor === 0) return; // 書き出すものがない
+        if (this.idxWriteCursor === 0) return; // Nothing to write out
 
-        // バッファ内の有効データ
+        // Valid data in buffer
         const bufToFlush = this.bufWrite.subarray(0, this.idxWriteCursor);
         
-        // 🌟 Fix: 第4引数(position)は null 固定。
-        // これにより ZenFS の内部カーソル（Appendモードなら末尾）に従って書き込まれる。
+        // [Fix]: 4th argument (position) is fixed to null.
+        // This ensures writing follows ZenFS internal cursor (end of file if in Append mode).
         const { bytesWritten } = await this.hFile.write(bufToFlush, 0, this.idxWriteCursor, this.idxFilePosWrite);
         
-        // 参考までに内部カウンタは更新するが、書き込み位置制御には使用しない
+        // Update internal counter for reference, but do not use for write position control.
         this.idxFilePosWrite += bytesWritten;
         
-        // カーソルをリセット（リニアバッファなので先頭に戻すだけ）
+        // Reset cursor (linear buffer, so just return to start).
         this.idxWriteCursor = 0;
     }
 
@@ -242,12 +242,12 @@ export class FileStream implements IFileStream {
     // ==========================================
 
     /**
-     * File -> Ring Buffer へのデータ補充
+     * Replenish data from File to Ring Buffer
      */
     private async fillReadBuffer(): Promise<{ filled: number }> {
-        // リングバッファの「物理的な」連続書き込み可能サイズを計算
+        // Calculate "physical" contiguous writable size of the ring buffer
         const cntToTerm = this.limReadRing - this.idxReadHead;
-        // 論理的な空き容量
+        // Logical free capacity
         const cntFree = this.limReadRing - this.cntReadValid;
         
         const cntToRead = Math.min(cntFree, cntToTerm);
@@ -266,8 +266,8 @@ export class FileStream implements IFileStream {
     }
 
     /**
-     * Ring Buffer -> User Buffer へのデータコピー
-     * (リングの折り返し[Wrap]を考慮してコピーする)
+     * Copy data from Ring Buffer to User Buffer
+     * (Consider ring wrap-around [Wrap] during copy)
      */
     private copyRingToUser(idxDst: number, cnt: number): void {
         if (!this.bufUserRead) return;
@@ -275,11 +275,11 @@ export class FileStream implements IFileStream {
         const cntToTerm = this.limReadRing - this.idxReadTail;
 
         if (cnt <= cntToTerm) {
-            // 折り返しなし: 一回でコピー
+            // No wrap: single copy operation
             const sub = this.bufReadRing.subarray(this.idxReadTail, this.idxReadTail + cnt);
             this.bufUserRead.set(sub, idxDst);
         } else {
-            // 折り返しあり: 終端まで + 先頭から
+            // With wrap: copy to end + copy from start
             const sub1 = this.bufReadRing.subarray(this.idxReadTail, this.limReadRing);
             this.bufUserRead.set(sub1, idxDst);
 
@@ -298,13 +298,13 @@ export class FileStream implements IFileStream {
     }
     
     public async close(): Promise<void> { 
-        // 閉じる前に必ず残存データを吐き出す
+        // Always flush remaining data before closing
         try {
             await this.flush();
         } catch (e) {
-            // Close時のFlushエラーはログ等に留めるのが一般的だが、
-            // ここでは呼び出し元に伝えるためスローしても良い。
-            // 状況に応じて握りつぶす設計もアリ。
+            // Flush errors on close are usually logged, but
+            // can be thrown here to notify the caller.
+            // Swallowing the error is also a design choice.
             throw e;
         } finally {
             this.bufUserRead = null;
