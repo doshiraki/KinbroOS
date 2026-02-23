@@ -61,7 +61,7 @@ npm run build -- --mode kernel
 ### 2. How to Boot (Bookmarklet)
 KinbroOS operates by "parasitizing" any webpage via a browser bookmarklet.
 
-1. Copy the contents of `bookmarklet.js` from this repository.
+1. Copy the contents of `src/bios/bookmarklet.js` from this repository.
 2. Create a new bookmark in your browser, paste the copied code (starting with `javascript:`) into the URL field, and save it.
 3. Open any webpage, then click the saved bookmarklet to execute it.
 4. **First Boot:** You will be prompted to upload a file. Select the compiled kernel file (`vmKinbroOS.js`). The kernel will be saved to your browser's OPFS (Origin Private File System) and booted.
