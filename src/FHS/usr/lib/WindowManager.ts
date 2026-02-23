@@ -17,8 +17,8 @@
 import interact from 'interactjs';
 import { DisplayServer } from './DisplayServer'; // Import!
 
-// CSSのインポート (Userlandビルド時にバンドルされる前提)
-// 本来はテーママネージャー等が管理すべきだけど、今はここに集約しちゃうね
+// CSS import (assumed to be bundled during Userland build)
+// Note: Ideally managed by a Theme Manager, but centralized here for now.
 import cssXterm from '@xterm/xterm/css/xterm.css?inline';
 import cssTerminal from '../include/terminal.css?inline';
 
@@ -31,13 +31,13 @@ export class WindowManager {
     private objDisplay: DisplayServer;
 
     constructor() {
-        // DisplayServerに接続 (Waylandでいうと `wl_display_connect` に近い感覚)
+        // Connect to DisplayServer (similar to `wl_display_connect` in Wayland)
         this.objDisplay = DisplayServer.getInstance();
-        this.objDisplay.init(); // 必要なら初期化させる
+        this.objDisplay.init(); // Initialize if necessary
     }
 
     public createWindow(strTitle: string): { domWindow: HTMLElement, domContent: HTMLElement, domCloseBtn: HTMLElement } {
-        // 1. DOM構築 (Factory Logic)
+        // 1. DOM Construction (Factory Logic)
         const domWindow = document.createElement('div');
         domWindow.className = 'kinbro-window';
 
@@ -62,15 +62,15 @@ export class WindowManager {
         domWindow.appendChild(domHeader);
         domWindow.appendChild(domContent);
 
-        // 2. [重要] DisplayServerのルートへマウント
-        // WindowManagerは「どこ(Display)」に置くかを知っている
+        // 2. [Critical] Mount to DisplayServer root
+        // WindowManager knows "where (Display)" to place it
         this.objDisplay.getRoot().appendChild(domWindow);
 
-        // キー入力の流出阻止（スペースでチャットに飛ばされるのを防ぐ）
+        // Prevent keyboard input leakage (e.g., prevents space key from triggering unintended actions)
         domWindow.addEventListener('keydown', (e) => e.stopPropagation());
         domWindow.addEventListener('keyup',   (e) => e.stopPropagation());
         
-        // マウス操作の流出阻止（意図しないドラッグやフォーカス移動を防ぐ）
+        // Prevent mouse interaction leakage (prevents unintended drags or focus shifts)
         domWindow.addEventListener('mousedown', (e) => e.stopPropagation());
         //domWindow.addEventListener('mouseup',   (e) => e.stopPropagation());
         domWindow.addEventListener('click',     (e) => e.stopPropagation());
@@ -81,17 +81,17 @@ export class WindowManager {
             }
         });
     
-        // 3. 配置・挙動の設定
+        // 3. Configuration of placement and behavior
         this.makeFloating(domWindow, () => {}); 
 
         return { domWindow, domContent, domCloseBtn };
     }
 
     /**
-     * 指定した要素を「浮遊ウィンドウ」化する (Privateでもいいかも？)
+     * Converts specified element into a floating window.
      */
     public makeFloating(domTarget: HTMLElement, fnOnResize: () => void): void {
-        // 初期座標を少しずらす（複数の窓を開いたとき重ならないようにする配慮）
+        // Offset initial coordinates (prevents overlapping when multiple windows open)
         this.valX += 20;
         this.valY += 20;
 
@@ -104,7 +104,7 @@ export class WindowManager {
             height: `${this.valH}px`
         });
 
-        // interact.js設定 (変更なし)
+        // interact.js configuration (unchanged)
         interact(domTarget)
             .draggable({
                 allowFrom: '.window-header',
@@ -117,7 +117,7 @@ export class WindowManager {
                         // 一旦、個別のウィンドウインスタンスを持たないこのクラス設計なら
                         // data属性などに持たせるのが手っ取り早いかも。
                         
-                        // 簡易修正: data属性で座標管理
+                        // [Fix] Manage coordinates via data attributes
                         const x = (parseFloat(domTarget.getAttribute('data-x') || String(this.valX))) + objEvent.dx;
                         const y = (parseFloat(domTarget.getAttribute('data-y') || String(this.valY))) + objEvent.dy;
 
@@ -144,7 +144,7 @@ export class WindowManager {
                 ]
             });
             
-        // 初期値をセット
+        // Set initial values
         domTarget.setAttribute('data-x', String(this.valX));
         domTarget.setAttribute('data-y', String(this.valY));
     }

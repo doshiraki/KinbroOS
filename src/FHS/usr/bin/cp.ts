@@ -24,9 +24,9 @@ import { Stats } from '@zenfs/core';
 
 /**
  * [Command: cp]
- * ファイルやディレクトリをコピーする。
- * GNU coreutils 準拠 (Recursive, Backup, Update, Attributes-only supported)
- * IFileStream の attach/read API を使用したメモリ効率の良い実装。
+ * Copies files and directories.
+ * GNU coreutils compliant (Recursive, Backup, Update, Attributes-only supported)
+ * Memory-efficient implementation using IFileStream's attach/read API.
  */
 export async function main(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
     const parser = new CommandParser(args, {
@@ -66,22 +66,22 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     const writer = new BinaryWriter(proc.stdout!.getByteWriter());
     const errWriter = new BinaryWriter(proc.stderr!.getByteWriter());
 
-    // ヘルプ表示
+    // Display help
     if (parser.isHelpRequested) {
         await writer.writeString(parser.getHelp() + '\n');
         writer.releaseLock(); errWriter.releaseLock();
         return 0;
     }
-    // 引数バリデーション
+    // Argument validation
     if (parser.validate()) {
         await errWriter.writeString(parser.validate() + '\n');
         writer.releaseLock(); errWriter.releaseLock();
         return 1;
     }
 
-    // --- 1. オプション解析と優先順位解決 ---
+    // --- 1. Option parsing and priority resolution ---
 
-    // Archive Mode (-a): -dR --preserve=all 相当
+    // Archive Mode (-a): Equivalent to -dR --preserve=all
     const isArchive = parser.has('a', 'archive');
     
     // Recursive
@@ -95,7 +95,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     // Last Wins Strategy
     let modeOverwrite = 'force'; // default
     
-    // 引数を逆順走査して決定する
+    // Determine by scanning arguments in reverse order
     for (let i = args.length - 1; i >= 0; i--) {
         const arg = args[i];
         if (arg === '-n' || arg === '--no-clobber') { modeOverwrite = 'no-clobber'; break; }
@@ -114,7 +114,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     const isBackup = parser.has('b') || parser.has(undefined, 'backup'); 
     const backupSuffix = (parser.get('suffix') as string) || '~'; 
 
-    // --- 2. ソースとターゲットの決定 ---
+    // --- 2. Determination of source and destination ---
     let arrSources: string[] = [];
     let strDest: string | null = null;
     let isTargetDirectoryMode = false;
@@ -139,11 +139,11 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         arrSources = arrSources.map(s => s.endsWith('/') && s !== '/' ? s.slice(0, -1) : s);
     }
 
-    // --- 3. コピー処理の実行 ---
+    // --- 3. Execution of copy process ---
     let exitCode = 0;
 
     try {
-        // ターゲットがディレクトリかどうか
+        // Check if target is a directory
         let destIsDir = false;
         if (!noTargetDir && strDest) {
             try {
@@ -152,46 +152,46 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
             } catch {}
         }
 
-        // 複数ソース -> ディレクトリ必須
+        // Multiple sources -> directory is required
         if (arrSources.length > 1 && !destIsDir && !isTargetDirectoryMode) {
             await errWriter.writeString(`cp: target '${strDest}' is not a directory\n`);
             writer.releaseLock(); errWriter.releaseLock();
             return 1;
         }
 
-        // コピーロジック (再帰対応)
+        // Copy logic (supports recursion)
         const processCopyItem = async (srcPath: string, destPath: string) => {
             try {
-                // ソースの確認
+                // Source verification
                 const statSrc = await proc.fs.getStat(srcPath);
 
                 if (statSrc.isDirectory()) {
-                    // ディレクトリのコピー
+                    // Copy directory
                     if (!isRecursive) {
                         await errWriter.writeString(`cp: -r not specified; omitting directory '${srcPath}'\n`);
                         exitCode = 1;
                         return;
                     }
                     
-                    // 宛先ディレクトリ作成
+                    // Create destination directory
                     if (!await proc.fs.exists(destPath)) {
                         await proc.fs.makeDir(destPath);
                         if (isVerbose) await writer.writeString(`created directory '${destPath}'\n`);
                     }
 
-                    // 中身を再帰的にコピー
+                    // Recursively copy contents
                     const items = await proc.fs.readDir(srcPath);
                     for (const item of items) {
                         await processCopyItem(`${srcPath}/${item}`, `${destPath}/${item}`);
                     }
 
-                    // ディレクトリ自体の属性保持 (-p/-a)
+                    // Preserve directory attributes (-p/-a)
                     if (preserve) {
-                         // IFileSystemにchmodがあれば実行 (IFileSystemにはchmodが存在する)
+                         // Execute if IFileSystem has chmod (IFileSystem has chmod)
                          await proc.fs.chmod(destPath, statSrc.mode);
                     }
                 } else {
-                    // ファイルのコピー
+                    // Copy file
                     await copyFile(srcPath, destPath, statSrc);
                 }
             } catch (e: any) {
@@ -200,24 +200,24 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
             }
         };
 
-        // ファイル単体のコピーロジック
+        // Single file copy logic
         const copyFile = async (src: string, dest: string, statSrc: Stats) => {
-            // [Link Mode] シンボリックリンク・ハードリンク
-            // OPFSでは未サポートのため、エラーまたはスキップ
+            // [Link Mode] Symbolic links / Hard links
+            // Unsupported in OPFS, so error or skip
             if (makeSymlink || makeHardlink) {
                  await errWriter.writeString(`cp: links are not supported on this file system\n`);
                  exitCode = 1;
                  return;
             }
 
-            // [Overwrite Logic] 宛先が存在する場合
+            // [Overwrite Logic] If destination exists
             if (await proc.fs.exists(dest)) {
                 // -n: No Clobber
                 if (modeOverwrite === 'no-clobber') return;
 
                 const statDest = await proc.fs.getStat(dest);
 
-                // -u: Update (SourceがDestより新しい場合のみコピー)
+                // -u: Update (Copy only if Source is newer than Dest)
                 if (isUpdate && statSrc.mtimeMs <= statDest.mtimeMs) return;
 
                 // -i: Interactive
@@ -237,8 +237,8 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
                 if (isBackup) {
                     const backupPath = dest + backupSuffix;
                     try {
-                        // rename API (IFileSystemに追加された前提) を使用
-                        // IFileSystem.rename は存在すると仮定(mvの実装と同様)
+                        // Use rename API (assuming it is added to IFileSystem)
+                        // Assume IFileSystem.rename exists (similar to mv implementation)
                         await proc.fs.rename(dest, backupPath);
                         if (isVerbose) await writer.writeString(`backed up '${dest}' to '${backupPath}'\n`);
                     } catch (e: any) {
@@ -255,33 +255,33 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
                 }
             } else {
                 // [Data Copy using IFileStream]
-                // 1. ソースを開く
+                // 1. Open source
                 const fsIn = await proc.fs.open(src, 'r');
                 
-                // 2. ターゲットを開く
-                // overwriteの場合は 'w' で開くことでtruncateされる
+                // 2. Open target
+                // If overwrite, opening with 'w' truncates it
                 const fsOut = await proc.fs.open(dest, 'w');
 
                 try {
-                    // 3. バッファをアタッチ (必須！)
-                    // Web Streamsではないので、attach() してから read() ループする
+                    // 3. Attach buffer (Required!)
+                    // Not Web Streams, so loop read() after attach()
                     const bufSize = 64 * 1024;
                     const buf = new Uint8Array(bufSize);
                     fsIn.attach(buf);
 
                     while (true) {
-                        // 積み上げ読み込み
-                        const { cntRead, data } = await fsIn.read(); // dataはbufへのビュー
+                        // Incremental read
+                        const { cntRead, data } = await fsIn.read(); // data is a view to buf
                         if (cntRead === 0) break; // EOF
                         
-                        // 書き込み (IFileStream.writeは内部バッファリング＆バックプレッシャー制御あり)
+                        // Write (IFileStream.write has internal buffering \& backpressure control)
                         await fsOut.write(data);
                     }
                 } catch (e: any) {
                      await errWriter.writeString(`cp: error writing to '${dest}': ${e.message}\n`);
                      exitCode = 1;
                 } finally {
-                    // クローズ (内部でflushされる)
+                    // Close (flushed internally)
                     await fsIn.close();
                     await fsOut.close();
                 }
@@ -290,9 +290,9 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
             // [Preserve Attributes] -p, -a
             if (preserve) {
                 try {
-                    // IFileSystem.chmod は定義済み
+                    // IFileSystem.chmod is already defined
                     await proc.fs.chmod(dest, statSrc.mode);
-                    // mtime等の復元は IFileSystem に utimes がないためスキップ
+                    // Skip restoring mtime etc. as IFileSystem lacks utimes
                 } catch {}
             }
 
@@ -300,10 +300,10 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         };
 
 
-        // メインループ
+        // Main loop
         for (const src of arrSources) {
             let finalDest = strDest!;
-            // ディレクトリへのコピーならファイル名を結合
+            // Join filename if copying to a directory
             if (destIsDir) {
                 const fileName = src.split('/').pop() || src;
                 finalDest = `${strDest}/${fileName}`;
@@ -321,7 +321,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
 }
 
 /**
- * [Helper] ユーザー確認
+ * [Helper] User confirmation
  */
 async function readConfirmation(proc: IProcess): Promise<boolean> {
     if (!proc.stdin) return false;

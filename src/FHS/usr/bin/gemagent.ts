@@ -22,8 +22,8 @@ import { Kibsh } from './kibsh';
 import { BinaryReader, BinaryWriter } from '../lib/StreamUtils';
 
 /**
- * 🌟 [Stable Recursive Integrated Edition] GemAgent
- * 安定したブロック抽出と、再帰的なコマンド展開を統合。
+ * [Stable Recursive Integrated Edition] GemAgent
+ * Integrates stable block extraction and recursive command expansion.
  */
 export async function main(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
     const writer = proc.stdout!.getStringWriter();
@@ -74,7 +74,7 @@ $ . /topath/file.sh
             const responseText = await interactWithGemini(currentInput);
             await writer.write('\x1b[2K\r'); 
 
-            // 🌟 推薦された安定版ロジックを使用
+            // [Logic] Use recommended stable logic
             const cmdBlock = extractCommandBlock(responseText);
 
             if (!cmdBlock || cmdBlock.commands.length === 0) {
@@ -89,7 +89,7 @@ $ . /topath/file.sh
             }
             await writer.write(`\x1b[1;35m[Agent] Executing Commands...\x1b[0m\r\n`);
 
-            // 🌟 実行エンジン（再帰・コメント対応）
+            // [Engine] Execution engine (supports recursion and comments)
             const resultText = await executeCommandsRealtime(cmdBlock.commands, sys, proc, writer);
 
             currentInput = formatResultBlock(resultText);
@@ -105,19 +105,19 @@ $ . /topath/file.sh
     return 0;
 }
 
-// 🌟 正規表現：キュー内は $ 除去済みを想定
+// [Regex] Assumes $ has been removed from the queue
 const RE_COMMENT = /^\s*#/;           
 const RE_SOURCE  = /^\s*\.\s+/;       
 
 /**
- * 🌟 [Logic] コマンド実行エンジン (再帰的プリプロセッサ)
+ * [Logic] Command execution engine (recursive preprocessor)
  */
 async function executeCommandsRealtime(commands: string[], sys: SystemAPI, parentProc: IProcess, terminalWriter: any): Promise<string> {
     let fullLog = '';
     const decoder = new TextDecoder();
     const shell = new Kibsh(sys, parentProc);
 
-    // 🌟 unshift で再帰展開をサポート
+    // [Recursion] Support recursive expansion using unshift
     const queueCommands = [...commands];
 
     while (queueCommands.length > 0) {
@@ -125,15 +125,15 @@ async function executeCommandsRealtime(commands: string[], sys: SystemAPI, paren
         const cmdTrimmed = cmdExec.trim();
         if (!cmdTrimmed || cmdTrimmed.startsWith('```')) continue;
 
-        // --- 1. コメント判定 ---
+        // --- 1. Comment detection ---
         if (RE_COMMENT.test(cmdTrimmed)) {
             const strComment = `${cmdTrimmed}\n`;
             await terminalWriter.write(`\x1b[2m${strComment}\x1b[0m`);
             fullLog += strComment;
-            continue; // シェルには渡さずスキップ
+            continue; // Skip without passing to shell
         }
 
-        // --- 2. ソース判定 (再帰展開) ---
+        // --- 2. Source detection (recursive expansion) ---
         const matchSource = cmdTrimmed.match(RE_SOURCE);
         if (matchSource) {
             const pathTarget = cmdTrimmed.slice(matchSource[0].length).trim();
@@ -141,7 +141,7 @@ async function executeCommandsRealtime(commands: string[], sys: SystemAPI, paren
                 const strContent = await parentProc.fs.readFile(pathTarget, 'utf8') as string;
                 const arrNewLines = strContent.split('\n').map(l => l.trim()).filter(l => l !== '');
                 
-                queueCommands.unshift(...arrNewLines); // 先頭に割り込ませる
+                queueCommands.unshift(...arrNewLines); // Prepend to the front of the queue
                 const strMsg = `# [Agent] Sourced ${arrNewLines.length} lines from ${pathTarget}\n`;
                 await terminalWriter.write(`\x1b[32m${strMsg}\x1b[0m`);
                 fullLog += strMsg;
@@ -153,9 +153,9 @@ async function executeCommandsRealtime(commands: string[], sys: SystemAPI, paren
             continue;
         }
 
-        // --- 3. 通常実行 ---
+        // --- 3. Normal execution ---
         await terminalWriter.write(`\x1b[1;32m${cmdExec}\n\x1b[0m`);
-        fullLog += `$ ${cmdExec}\n`; // Gemini報告用
+        fullLog += `$ ${cmdExec}\n`; // For Gemini reporting
 
         let cmdOutput = '';
         const streamLog = new WritableStream<Uint8Array>({
@@ -192,7 +192,7 @@ async function executeCommandsRealtime(commands: string[], sys: SystemAPI, paren
 }
 
 /**
- * 🌟 [Parser] 推薦された安定版ロジック
+ * [Parser] Recommended stable logic
  */
 function extractCommandBlock(text: string): { fullMatch: string, commands: string[] } | null {
     const marker = "[To KinbroOS]";
@@ -204,7 +204,7 @@ function extractCommandBlock(text: string): { fullMatch: string, commands: strin
     const lines = content.split('\n');
     for (const line of lines) {
         const trimmed = line.trim();
-        // $ で始まる行の中身を抽出
+        // Extract content from lines starting with $
         if (trimmed.startsWith('$')) {
             commands.push(trimmed.slice(1).trim());
         }

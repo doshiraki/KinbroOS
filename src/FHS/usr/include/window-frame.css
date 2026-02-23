@@ -1,11 +1,11 @@
-/* [私たちの美学: デザイン規約]
-   1. 視認性: Tokyo Nightカラーを基調とした高コントラスト設計。
-   2. 操作性: ドラッグ領域（Header）を明確にし、直感的な操作を促す。
+/* [Aesthetics: Design Guidelines]
+   1. Visibility: High-contrast design based on Tokyo Night colors.
+   2. Usability: Clearly defined drag areas (Header) for intuitive operation.
 */
 
 :host {
     --bg-color: #1a1b26;
-    --header-color: #24283b;;
+    --header-color: #24283b;
     --border-color: #414868;
     --accent-color: #7aa2f7;
     --text-color: #a9b1d6;
@@ -17,15 +17,15 @@
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    
-    /* Shadow DOM内での配置用 */
-    position: fixed; /* Shadow Root内でも有効 */
-    /* z-index は Host 側で制御しているのでここでは不要だが、念のため */
+    font-family: sans-serif;
+
+    /* Placement within Shadow DOM */
+    position: fixed;
+    /* z-index is managed by Host; included for safety */
     z-index: 9999;
 }
 
-/* ドラッグ用のヘッダー領域 */
+/* Header area for dragging */
 .window-header {
     height: 32px;
     background-color: var(--header-color);
@@ -44,8 +44,6 @@
 
 .window-title {
     color: var(--accent-color);
-    font-size: 12px;
-    font-weight: bold;
     letter-spacing: 0.5px;
     flex-grow: 1;
 }
@@ -60,5 +58,5 @@
     transition: color 0.2s;
 }
 .window-close:hover {
-    color: #f7768e; /* Tokyo Night の赤 */
+    color: #f7768e; /* Tokyo Night Red */
 }

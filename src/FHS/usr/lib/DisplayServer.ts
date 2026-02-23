@@ -19,12 +19,12 @@ import cssFrame from '../include/window-frame.css?inline'; // ✨ New!
 
 /**
  * [Class: DisplayServer] (Role: Wayland Output)
- * 物理的な描画領域(Shadow DOM Host)を管理する。
- * アプリケーションやWindowManagerに対して、描画すべき「ルート」を提供する。
+ * Manages the physical rendering area (Shadow DOM Host).
+ * Provides the "root" element where applications and WindowManager render.
  */
 export class DisplayServer {
     
-    // 描画領域の実体
+    // Entity of the rendering area
     private domHost: HTMLElement | null = null;
     private shadowRoot: ShadowRoot | null = null;
     
@@ -35,7 +35,7 @@ export class DisplayServer {
     }
 
     /**
-     * インスタンス取得 (Lazy Initialization)
+     * Get instance (Lazy Initialization)
      */
     public static getInstance(): DisplayServer {
         let instance: any;
@@ -51,19 +51,19 @@ export class DisplayServer {
     }
 
     /**
-     * [Boot] ディスプレイ環境を初期化する
-     * Shadow DOMを作成し、基本スタイル(CSS)を焼き付ける
+     * [Boot] Initialize display environment
+     * Create Shadow DOM and inject base styles (CSS)
      */
     public init(): void {
-        if (this.shadowRoot) return; // 既に起動済み
+        if (this.shadowRoot) return; // Already initialized
 
-        // 1. Host Element (モニター枠) の確保
+        // 1. Acquire Host Element (Monitor Frame)
         let host = document.getElementById(this.ID_HOST);
         if (!host) {
             host = document.createElement('div');
             host.id = this.ID_HOST;
             
-            // 画面全体を覆う設定 (Pointer Eventsは透過)
+            // Setup to cover full screen (Pointer Events are transparent)
             Object.assign(host.style, { 
                 position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh', 
                 zIndex: '2147483647', pointerEvents: 'none' 
@@ -72,17 +72,17 @@ export class DisplayServer {
         }
         this.domHost = host;
 
-        // 2. Shadow Root (描画コンテキスト) の作成
+        // 2. Create Shadow Root (Rendering Context)
         this.shadowRoot = host.attachShadow({ mode: 'open' });
 
-        // 3. Global Styles (Compositor Level Styles) の注入
-        // ここで注入するのは「OS全体の共通テーマ」など
+        // 3. Inject Global Styles (Compositor Level Styles)
+        // Inject OS-wide common themes here
         const style = document.createElement('style');
         style.textContent = `
             :host { all: initial; font-family: sans-serif; pointer-events: none; }
-            .kinbro-window { pointer-events: auto; } /* ウィンドウのみ操作可能 */
+            .kinbro-window { pointer-events: auto; } /* Only windows are interactable */
             
-            /* アプリケーション共通CSSもここで管理 */
+            /* Manage application-wide CSS here */
             ${cssFrame}
         `;
         this.shadowRoot.appendChild(style);
@@ -91,7 +91,7 @@ export class DisplayServer {
     }
 
     /**
-     * ウィンドウをマウントするためのルート要素を取得する
+     * Get the root element for mounting windows
      */
     public getRoot(): ShadowRoot {
         if (!this.shadowRoot) {
@@ -101,7 +101,7 @@ export class DisplayServer {
     }
 
     /**
-     * シャットダウン（デバッグ用・緊急停止用）
+     * Shutdown (for debugging and emergency stops)
      */
     public shutdown(): void {
         if (this.domHost) {

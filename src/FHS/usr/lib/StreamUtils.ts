@@ -17,39 +17,39 @@
 /**
  * [Library: StreamUtils]
  * Web Streams API Wrapper
- * バイナリ(Uint8Array)と文字列(String)の相互変換を簡略化するユーティリティ。
+ * Utilities to simplify conversion between binary (Uint8Array) and string.
  */
 
 // --- Interfaces ---
 
 export interface IBinaryReader {
-    /** 生のReaderを取得 (Escape Hatch) */
+    /** Get raw reader (Escape Hatch) */
     readonly raw: ReadableStreamDefaultReader<Uint8Array>;
     
-    /** 生のバイト列として読み込む */
+    /** Read as raw bytes */
     read(): Promise<ReadableStreamReadResult<Uint8Array>>;
     
-    /** 文字列として読み込む (自動デコード) */
+    /** Read as string (auto-decode) */
     readString(): Promise<{ value: string, done: boolean }>;
     
-    /** ロックを解放する */
+    /** Release stream lock */
     releaseLock(): void;
 }
 
 export interface IBinaryWriter {
-    /** 生のWriterを取得 (Escape Hatch) */
+    /** Get raw writer (Escape Hatch) */
     readonly raw: WritableStreamDefaultWriter<Uint8Array>;
     
-    /** 生のバイト列を書き込む */
+    /** Write raw bytes */
     write(chunk: Uint8Array): Promise<void>;
     
-    /** 文字列を書き込む (自動エンコード) */
+    /** Write string (auto-encode) */
     writeString(str: string): Promise<void>;
     
-    /** ロックを解放する */
+    /** Release stream lock */
     releaseLock(): void;
     
-    /** ストリームを閉じる */
+    /** Close the stream */
     close(): Promise<void>;
 }
 
