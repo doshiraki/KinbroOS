@@ -21,7 +21,7 @@ import { BinaryWriter } from '../lib/StreamUtils';
 
 /**
  * [Tool: date]
- * 現在時刻を特定のフォーマットで表示、またはISO/RFC規格で出力する。
+ * Displays current time in specific formats or outputs in ISO/RFC standards.
  */
 export async function main(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
     const parser = new CommandParser(args, {
@@ -51,23 +51,23 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         const isRfc = parser.has('R', 'rfc-email');
         const isoOption = parser.has('I', 'iso-8601');
         
-        // +で始まる引数をカスタムフォーマットとして抽出
+        // Extract arguments starting with + as custom format
         const customFormat = parser.args.find(a => a.startsWith('+'))?.substring(1);
 
         const now = new Date();
         let output = "";
 
         if (isRfc) {
-            // RFC 5322 形式: Mon, 14 Aug 2006 02:34:56 -0600
+            // RFC 5322 format: Mon, 14 Aug 2006 02:34:56 -0600
             output = isUtc ? now.toUTCString() : now.toString(); 
         } else if (isoOption) {
-            // ISO 8601 形式: 2006-08-14
+            // ISO 8601 format: 2006-08-14
             output = isUtc ? now.toISOString().split('.')[0] + 'Z' : now.toISOString().split('.')[0];
         } else if (customFormat) {
-            // %Y, %m, %d などの識別子を置換
+            // Replace identifiers such as %Y, %m, %d
             output = formatTime(now, customFormat, isUtc);
         } else {
-            // デフォルト表示
+            // Default display
             output = isUtc ? now.toUTCString() : now.toLocaleString();
         }
 
@@ -76,7 +76,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         await errWriter.writeString(`date: ${e.message}\n`);
         return 1;
     } finally {
-        // パイプラインを止めないために確実にクローズする
+        // Close reliably to prevent stopping the pipeline
         writer.close();
         errWriter.close();
     }
@@ -94,7 +94,7 @@ function formatTime(date: Date, format: string, utc: boolean): string {
     const M = pad(utc ? date.getUTCMinutes() : date.getMinutes());
     const S = pad(utc ? date.getUTCSeconds() : date.getSeconds());
 
-    // date.txt に記載された主要な識別子をサポート
+    // Support major identifiers described in date.txt
     return format
         .replace(/%%/g, '%')
         .replace(/%Y/g, String(Y))

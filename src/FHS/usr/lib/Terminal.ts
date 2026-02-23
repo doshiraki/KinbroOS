@@ -22,8 +22,8 @@ import { ReadableStreamDefaultController } from 'node:stream/web';
 
 /**
  * [Class: TerminalUI]
- * xterm.js をラップし、Web Streams API 準拠の入出力インターフェースを提供する。
- * 既存の編集機能(矢印キー、履歴、補完)を維持するため、Line Discipline(行編集)はここで行う。
+ * Wraps xterm.js and provides an I/O interface compliant with Web Streams API.
+ * Handles Line Discipline to maintain features like arrow keys, history, and completion.
  */
 export class TerminalUI {
     public readonly readable: ReadableStream<string>;
@@ -32,7 +32,7 @@ export class TerminalUI {
     private objTerm: Terminal;
     private objFit: FitAddon;
 
-    // ✨ Add: 変換用エンコーダ/デコーダ
+    // [Update] Encoder/Decoder for stream conversion
     private encoder = new TextEncoder();
     private decoder = new TextDecoder();    
 
@@ -40,7 +40,7 @@ export class TerminalUI {
     private controllerInput?: ReadableStreamDefaultController<string>;
 
     /**
-     * @param objShellHelper Tab補完計算用のシェルインスタンス
+     * @param objShellHelper Shell instance for Tab completion calculations
      */
     constructor() {
 
@@ -73,7 +73,7 @@ export class TerminalUI {
         this.writable = new WritableStream({
             write: (chunk) => {
                 return new Promise<void>((resolve) => {
-                    // ✨ バイト列を文字列に戻して表示
+                    // [Render] Decode bytes to string and write to terminal
                     const strChunk = this.decoder.decode(chunk, { stream: true });
                     this.objTerm.write(strChunk, () => resolve());
                 });
@@ -89,7 +89,7 @@ export class TerminalUI {
     public mount(domContainer: HTMLElement): void {
         this.objTerm.open(domContainer);
         this.resize();
-        // プロンプトはShellが出すので、ここでは何もしない、または初期メッセージのみ
+        // Prompts are managed by the Shell; no action or only initial message here.
     }
 
     public resize(): void {
@@ -100,8 +100,8 @@ export class TerminalUI {
 
     private handleRawInput(strData: string): void {
         if (this.controllerInput) {
-            // CR -> LF 変換 (ICRNL)
-            // これをここで行うことで、kibsh側での変換が不要になる
+            // CR -> LF conversion (ICRNL)
+            // Performing this here removes the need for conversion in kibsh.
             const normalized = strData.replace(/\r/g, '\n');
             this.controllerInput.enqueue(normalized);
         }

@@ -19,7 +19,7 @@ import { IProcess, TTYMode } from '../../../dev/types/IProcess';
 import { BinaryReader, BinaryWriter } from './StreamUtils'; // ✨ Import
 import { TerminalUtils } from '../../../dev/utils/TerminalUtils';
 
-// 補完関数の型定義
+// Type definition for completer function
 export type Completer = (line: string) => Promise<string[]>;
 
 // ✨ 1. Enum Definition
@@ -39,16 +39,16 @@ export type ReadLineResultType = {
 }
 /**
  * [Class: TerminalUI]
- * xterm.js をラップし、Web Streams API 準拠の入出力インターフェースを提供する。
- * 既存の編集機能(矢印キー、履歴、補完)を維持するため、Line Discipline(行編集)はここで行う。
+ * Wraps xterm.js to provide an I/O interface compliant with Web Streams API.
+ * Line Discipline (line editing) is handled here to maintain editing features (arrows, history, completion).
  */
 export class ReadLine {
-    private proc: IProcess;      // ShellではなくProcessを持つ
-    private fnCompleter: Completer; // 補完ロジックは注入される
+    private proc: IProcess;      // Holds a Process, not a Shell
+    private fnCompleter: Completer; // Completion logic is injected
 
     // Line Buffering State
     private strInputBuffer: string = '';
-    private valCursorPos: number = 0; // バッファ内の論理カーソル位置
+    private valCursorPos: number = 0; // Logical cursor position within the buffer
     
     // ✨ ラッパー型を使用
     private reader: BinaryReader;
@@ -57,35 +57,35 @@ export class ReadLine {
     // ✨ 追加: 履歴管理用
     private history: string[] = [];
     private historyIndex: number = 0;
-    private currentPromptStr: string = ''; // 画面クリア用にプロンプトを覚えておく
+    private currentPromptStr: string = ''; // Store prompt for screen clearing
 
     // ✨ 追加: 入力中の一時保存用
     private currentInputStash: string = '';
     
     /**
-     * @param objShellHelper Tab補完計算用のシェルインスタンス
+     * @param objShellHelper Shell instance for Tab completion calculations
      */
     constructor(proc: IProcess, completer: Completer) {
         this.proc = proc;
-        this.fnCompleter = completer;        // ラッパーで包む
+        this.fnCompleter = completer;        // Wrap in a helper
         this.reader = new BinaryReader(proc.stdin!.getByteReader());
         this.writer = new BinaryWriter(proc.stdout!.getByteWriter());
     }
 
     /**
-     * 🛡️ 使い捨てシールドを作成
-     * 毎回新しい WritableStream を作ることで、kibsh がそれを close しても
-     * this.writer (本物) は影響を受けない。
+     * [Security] Create a disposable shield
+     * By creating a new WritableStream each time, even if kibsh closes it,
+     * the original this.writer remains unaffected.
      */
     public getBinaryWriter(): BinaryWriter {
         const shieldStream = new WritableStream<Uint8Array>({
             write: (chunk) => {
-                // 本物に流す
+                // Forward to original writer
                 return this.writer.write(chunk);
             },
             close: () => {
-                // kibsh が「終わった！」と言ってきても、本物は閉じない。
-                // この shieldStream 自体は閉じることになるが、それは使い捨てなのでOK。
+                // Even if kibsh signals completion, the original is not closed.
+                // This shieldStream itself will close, but since it is disposable, it is fine.
                 return Promise.resolve();
             },
             abort: (reason) => {
@@ -100,22 +100,22 @@ export class ReadLine {
         return this.reader;
     }
 
-    // ✨ 単発読み込みメソッド
+    // [Method] Single line read
     public async read(promptStr: string = '$ '): Promise<ReadLineResultType> {
-        // 1. Rawモードへ
+        // 1. Enter Raw mode
         if (this.proc.stdin?.isTTY) {
             await this.proc.stdin.setMode(TTYMode.Raw);
         }
 
         try {
-            this.currentPromptStr = promptStr; // ✨ 覚える
+            this.currentPromptStr = promptStr; // Store for later
             await this.writer.writeString(promptStr);
             this.strInputBuffer = ''; 
             this.valCursorPos = 0;
 
-            this.currentInputStash = ''; // ✨ クリア
+            this.currentInputStash = ''; // Clear stash
 
-            // ✨ 追加: 読み込み開始時は常に「最新(履歴の末尾)」にインデックスを合わせる
+            // [Update] Reset history index to latest on start
             this.historyIndex = this.history.length;
             
             while (true) {
@@ -125,7 +125,7 @@ export class ReadLine {
                     isEOF: true
                 };
 
-                // Enterが押されたらループを抜けて返す
+                // Exit loop and return when Enter is pressed
                 const result = await this.handleRawInput(value); 
                 if (result.result != ReadLineResult.Processed) {
                     return result;
@@ -133,7 +133,7 @@ export class ReadLine {
             }
 
         } finally {
-            // 2. Cookedモードへ戻す
+            // 2. Return to Cooked mode
             if (this.proc.stdin?.isTTY) {
                 await this.proc.stdin.setMode(TTYMode.Cooked);
             }
@@ -143,7 +143,7 @@ export class ReadLine {
     // --- Input Handling Logic (Existing Logic Preserved) ---
 
     private async handleRawInput(strData: string): Promise<ReadLineResultType> {
-        // 特殊キーの判定
+        // Detect special keys
         switch (strData) {
             case '\r': // CR (古い環境やペースト用)
             case '\n': // ✨ LF (TerminalUIから送られてくるのはこっち！)
@@ -167,7 +167,7 @@ export class ReadLine {
             case '\x1b[B': // ✨ Down Arrow
                 return this.handleHistory('down');
             default:
-                // 制御文字以外なら入力として扱う
+                // Treat as input if not a control character
                 if (strData.length >= 1 && strData.charCodeAt(0) >= 32) {
                     return this.handleInputText(strData);
                 }
@@ -178,17 +178,17 @@ export class ReadLine {
     }
 
     private handleInputText(strText: string): ReadLineResultType {
-        // 挿入モードの実装
+        // Implementation of insertion mode
         const strPre = this.strInputBuffer.slice(0, this.valCursorPos);
         const strPost = this.strInputBuffer.slice(this.valCursorPos);
         
         this.strInputBuffer = strPre + strText + strPost;
         this.valCursorPos += strText.length;
         
-        // 画面更新: カーソル以降を再描画
+        // Screen update: Redraw from cursor onwards
         this.writer.writeString(strText + strPost);
         
-        // カーソルを戻す
+        // Move cursor back to original position
         const widthPost = TerminalUtils.calcStrWidth(strPost);
         if (widthPost > 0) {
             this.writer.writeString('\x1b[D'.repeat(widthPost));
@@ -208,16 +208,16 @@ export class ReadLine {
             this.strInputBuffer = strHead + strTail;
             this.valCursorPos -= prev.length;
 
-            // 1. 削除する文字の幅分だけ戻る
+            // 1. Move back by the width of the deleted character
             this.writer.writeString('\x1b[D'.repeat(prev.width));
             
-            // 2. 残りの文字列(Tail)で上書きする
+            // 2. Overwrite with remaining string (Tail)
             this.writer.writeString(strTail);
             
-            // 3. 末尾のゴミを消す
+            // 3. Clear trailing residues
             this.writer.writeString(' '.repeat(prev.width));
             
-            // 4. カーソルを本来の位置に戻す
+            // 4. Reset cursor to intended position
             const widthTail = TerminalUtils.calcStrWidth(strTail);
             this.writer.writeString('\x1b[D'.repeat(widthTail + prev.width));
         }
@@ -232,9 +232,9 @@ export class ReadLine {
             case 'left': // Left Arrow
                 const prev = TerminalUtils.calcPrevGraphemeInfo(this.strInputBuffer, this.valCursorPos);
                 if (prev) {
-                    // 論理カーソル: データ長分戻る (絵文字なら2)
+                    // Logical cursor: move back by data length (e.g., 2 for emoji)
                     this.valCursorPos -= prev.length;
-                    // 見た目のカーソル: 幅分戻る (絵文字なら1)
+                    // Visual cursor: move back by display width (e.g., 1 for emoji)
                     this.writer.writeString('\x1b[D'.repeat(prev.width)); 
                 }
                 break;
@@ -242,9 +242,9 @@ export class ReadLine {
             case 'right': // Right Arrow
                 const next = TerminalUtils.calcNextGraphemeInfo(this.strInputBuffer, this.valCursorPos);
                 if (next) {
-                    // 論理カーソル: データ長分進む (絵文字なら2)
+                    // Logical cursor: move forward by data length (e.g., 2 for emoji)
                     this.valCursorPos += next.length;
-                    // 見た目のカーソル: 幅分進む (絵文字なら1)
+                    // Visual cursor: move forward by display width (e.g., 1 for emoji)
                     this.writer.writeString('\x1b[C'.repeat(next.width));
                 }
                 break;
@@ -255,12 +255,12 @@ export class ReadLine {
     }
 
     /**
-         * ✨ 履歴操作ハンドラ
+         * [Handler] History navigation handler
          */
     private handleHistory(dir: 'up' | 'down'): ReadLineResultType {
         if (dir === 'up') {
             if (this.historyIndex > 0) {
-                // ✨ 探索開始時(最新位置にいる時)に、現在の入力を退避する
+                // [Stash] Save current input when starting history search from the latest position
                 if (this.historyIndex === this.history.length) {
                     this.currentInputStash = this.strInputBuffer;
                 }
@@ -271,7 +271,7 @@ export class ReadLine {
             if (this.historyIndex < this.history.length) {
                 this.historyIndex++;
                 if (this.historyIndex === this.history.length) {
-                    // ✨ 最新に戻ったら、退避していた内容を復元する
+                    // [Restore] Restore stashed content when returning to the latest position
                     this.replaceInputBuffer(this.currentInputStash);
                 } else {
                     this.replaceInputBuffer(this.history[this.historyIndex]);
@@ -282,31 +282,31 @@ export class ReadLine {
     }
 
     /**
-     * ✨ 画面上の現在の入力を消去し、新しい文字列に置き換える
+     * Clear the current visual input and replace it with a new string
      */
     private replaceInputBuffer(newStr: string) {
-        // 1. カーソルを現在の入力の先頭(プロンプトの直後)まで戻す
-        // 現在のカーソル位置(valCursorPos)から逆算して左へ移動
-        // (本来はTerminalUtilsで正確な表示幅を計算すべきだが、簡易的に文字数分戻る)
-        // ※ 絵文字などが入るとズレる可能性があるが、今回は簡易実装で行く
+        // 1. Move cursor back to the start of the current input (after the prompt)
+        // Calculate distance from current valCursorPos and move left
+        // (Ideally use TerminalUtils for exact width, but simplified to character count here)
+        // * Note: Emojis might cause misalignment in this simplified implementation
         const currentWidth = TerminalUtils.calcStrWidth(this.strInputBuffer.slice(0, this.valCursorPos));
         if (currentWidth > 0) {
             this.writer.writeString('\x1b[D'.repeat(currentWidth));
         }
 
-        // 2. 現在の行を空白で塗りつぶして消す
-        // (入力されている文字列の全幅分スペースを書く)
+        // 2. Fill the current line with spaces to erase it
+        // (Write spaces for the full width of the current input)
         const fullWidth = TerminalUtils.calcStrWidth(this.strInputBuffer);
         this.writer.writeString(' '.repeat(fullWidth));
 
-        // 3. 再びカーソルを先頭に戻す (スペースを書いた分進んでしまっているため)
+        // 3. Reset cursor to the start again (as writing spaces advanced it)
         this.writer.writeString('\x1b[D'.repeat(fullWidth));
 
-        // 4. 新しい文字列で内部バッファを更新
+        // 4. Update internal buffer with the new string
         this.strInputBuffer = newStr;
-        this.valCursorPos = newStr.length; // カーソルは末尾へ
+        this.valCursorPos = newStr.length; // Move cursor to the end
 
-        // 5. 新しい文字列を描画
+        // 5. Render the new string
         this.writer.writeString(newStr);
     }
 
@@ -316,67 +316,67 @@ export class ReadLine {
         const strCommand = this.strInputBuffer;
         const strTrimed = strCommand.trim();
 
-        // 履歴保存は入力がある時だけ
+        // Save history only if there is input
         if (strTrimed.length > 0) {
-            // 直前のコマンドと同じなら保存しない、というロジックを入れると綺麗
+            // Note: Logic to skip duplicates (same as previous command) would be ideal
             if (this.history.length === 0 || this.history[this.history.length - 1] !== strTrimed) {
                 this.history.push(strTrimed);
             }
         }
 
-        // バッファリセット
+        // Reset buffer
         this.strInputBuffer = '';
         this.valCursorPos = 0;
 
-        // ✨ 修正: 空入力でも「コマンド完了」として返す
-        // これにより read() ループを脱出し、呼び出し元(kibsh)がループしてプロンプトを再表示できる
+        // [Fix] Return as "Command Finished" even for empty input
+        // This allows exiting the read() loop so kibsh can re-display the prompt
         return {
             result: ReadLineResult.command,
             payload: {
-                command: strTrimed // 空文字でもOK (kibsh側で無視される)
+                command: strTrimed // Empty string is fine (ignored by kibsh)
             }
         };
     }
 
     /**
-     * Tab補完: カーソル位置考慮 & LCP対応版
+     * Tab Completion: Cursor-aware \& LCP supported version
      */
     private async handleTabCompletion(): Promise<ReadLineResultType> {
-        // 1. カーソル位置までの文字列を取得
+        // 1. Get string up to cursor position
         const strUpToCursor = this.strInputBuffer.slice(0, this.valCursorPos);
 
-        // 2. カーソル直前の単語を抽出 (簡易的にスペース区切り)
-        // "git comm|it" の場合、"git comm" -> "comm" を抽出
+        // 2. Extract the word immediately before the cursor (space-delimited)
+        // e.g., "git comm|it" -> "git comm" -> extract "comm"
         const lastSpaceIdx = strUpToCursor.lastIndexOf(' ');
         const strTarget = strUpToCursor.slice(lastSpaceIdx + 1);
 
-        // 3. 補完候補取得 (ターゲットとなる単語のみを渡す)
+        // 3. Get completion candidates (passing only the target word)
         let arrMatches = await this.fnCompleter(strTarget);
 
         if (arrMatches.length === 0) {
             return { result: ReadLineResult.Processed };
         }
 
-        // 4. LCP (最長共通接頭辞) の計算
+        // 4. Calculate LCP (Longest Common Prefix)
         const strCommon = this.determineCommonPrefix(arrMatches);
 
-        // 5. 自動入力
-        // LCPが現在の入力(Target)より長ければ、その差分をカーソル位置に挿入する
-        // 例: Target="at", Common="atest" -> Suffix="est" を挿入
+        // 5. Auto-fill
+        // If LCP is longer than current input (Target), insert the suffix at the cursor
+        // e.g., Target="at", Common="atest" -> Insert Suffix="est"
         if (strCommon.length > strTarget.length) {
             const strSuffix = strCommon.slice(strTarget.length);
-            // handleInputText はカーソル位置への挿入と再描画を行う既存メソッド
+            // handleInputText handles insertion at cursor and redrawing
             this.handleInputText(strSuffix);
         }
 
-        // 6. 候補が複数ある場合 (またはLCP補完後もまだ候補が残る場合) は一覧表示
+        // 6. If multiple candidates remain (even after LCP fill), list them
         if (arrMatches.length > 1) {
             this.writer.writeString('\r\n' + arrMatches.map(s=>s.substring(s.lastIndexOf("/", s.length-2)+1)).join('  ') + '\r\n');
             
-            // プロンプトと現在のバッファ内容を再描画 (カーソルは行末へ)
+            // Redraw prompt and current buffer (move cursor to the end)
             await this.writer.writeString(this.currentPromptStr + this.strInputBuffer);
             
-            // 🌟 重要: カーソル位置を元の位置(valCursorPos)に戻す
+            // [Critical] Restore cursor to original valCursorPos
             const fullWidth = TerminalUtils.calcStrWidth(this.strInputBuffer);
             const cursorWidth = TerminalUtils.calcStrWidth(this.strInputBuffer.slice(0, this.valCursorPos));
             
@@ -392,7 +392,7 @@ export class ReadLine {
     }
 
     /**
-     * [Helper] 文字列配列の最長共通接頭辞を求める
+     * [Helper] Find the Longest Common Prefix (LCP) of a string array
      */
     private determineCommonPrefix(arr: string[]): string {
         if (arr.length === 0) return "";

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// 文字分割機 (日本語対応)
+// Grapheme splitter (Multi-byte support)
 let segmenter = new Intl.Segmenter('ja', { granularity: 'grapheme' });
 
 
@@ -26,7 +26,7 @@ export const TerminalUtils = {
     },
     
     /**
-     * [Helper] 文字列の表示幅を計算 (全角文字対応)
+     * [Helper] Calculate string display width (Fullwidth support)
      */
     calcStrWidth(str: string): number {
         let width = 0;
@@ -40,18 +40,18 @@ export const TerminalUtils = {
             if (
                 (code >= 0x1100 && code <= 0x11FF) || // Hangul Jamo
                 (code >= 0x2329 && code <= 0x232A) || // Angle Brackets
-                (code >= 0x2E80 && code <= 0xA4CF) || // CJK Radicals ~ Yi Syllables (漢字・ひらがな・カタカナ等)
+                (code >= 0x2E80 && code <= 0xA4CF) || // CJK Radicals ~ Yi Syllables (Kanji, Hiragana, Katakana, etc.)
                 (code >= 0xAC00 && code <= 0xD7A3) || // Hangul Syllables
                 (code >= 0xF900 && code <= 0xFAFF) || // CJK Compatibility Ideographs
                 (code >= 0xFE10 && code <= 0xFE19) || // Vertical Forms
                 (code >= 0xFE30 && code <= 0xFE6F) || // CJK Compatibility Forms
-                (code >= 0xFF01 && code <= 0xFF60) || // Fullwidth Forms (全角英数・記号)
+                (code >= 0xFF01 && code <= 0xFF60) || // Fullwidth Forms (Fullwidth Alphanumeric/Symbols)
                 (code >= 0xFFE0 && code <= 0xFFE6)    // Fullwidth Symbol Variants
             ) {
                 width += 2;
             } 
             else {
-                // ASCII, 半角カナ, そして絵文字もここに含まれる -> 幅1
+                // Includes ASCII, Half-width Kana, and Emojis -> width 1
                 width += 1;
             }
         }
@@ -59,7 +59,7 @@ export const TerminalUtils = {
     },
 
     /**
-     * [Helper] カーソル直前の「1文字(Grapheme)」の情報を取得
+     * [Helper] Get info of the single character (Grapheme) before cursor
      */
     calcPrevGraphemeInfo(strInputBuffer: string, valCursorPos: number): { text: string, length: number, width: number } | null {
         if (valCursorPos === 0) return null;
@@ -73,12 +73,12 @@ export const TerminalUtils = {
         const text = lastSegment.segment;
         return {
             text: text,
-            length: text.length, // 絵文字なら2
-            width: this.calcStrWidth(text) // 絵文字なら1
+            length: text.length, // 2 for Emojis
+            width: this.calcStrWidth(text) // 1 for Emojis
         };
     },
     /**
-     * [Helper] カーソル直前の「1文字(Grapheme)」の情報を取得
+     * [Helper] Get info of the single character (Grapheme) before cursor
      */
     calcNextGraphemeInfo(strInputBuffer: string, valCursorPos: number): { text: string, length: number, width: number } | null {
             if (valCursorPos >= strInputBuffer.length) return null;
@@ -93,8 +93,8 @@ export const TerminalUtils = {
             const text = firstSegment.segment;
             return {
                 text: text,
-                length: text.length, // 絵文字なら2
-                width: this.calcStrWidth(text) // 絵文字なら1
+                length: text.length, // 2 for Emojis
+                width: this.calcStrWidth(text) // 1 for Emojis
             };
         }
 };

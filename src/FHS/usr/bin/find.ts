@@ -25,25 +25,25 @@ import { Stats } from '@zenfs/core';
  * [Type Definitions]
  */
 interface FindContext {
-    path: string;      // 現在処理中のパス
-    name: string;      // ファイル名
-    stats: Stats;      // ファイル情報
-    depth: number;     // 深さ
+    path: string;      // Current path being processed
+    name: string;      // Filename
+    stats: Stats;      // File information
+    depth: number;     // Depth
 }
 
-// 評価関数の型
+// Type for evaluation function
 type Predicate = (ctx: FindContext) => Promise<boolean>;
 
 /**
  * [Command: find]
- * ディレクトリ階層を検索し、条件に一致するファイルに対してアクションを実行する。
- * GNU findutils 準拠 (-ls Action Supported)
+ * Search directory hierarchy and execute actions on matching files.
+ * GNU findutils compliant (-ls Action Supported)
  */
 export async function main(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
     const writer = new BinaryWriter(proc.stdout!.getByteWriter());
     const errWriter = new BinaryWriter(proc.stderr!.getByteWriter());
 
-    // 1. 簡易ヘルプチェック
+    // 1. Simple help check
     if (args.includes('--help')) {
         await writer.writeString(getHelp());
         writer.close();
@@ -51,7 +51,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         return 0;
     }
 
-    // 2. 引数の解析 (パス部分 と 式部分 の分離)
+    // 2. Argument parsing (separate path and expression)
     const paths: string[] = [];
     let expressionArgs: string[] = [];
     
@@ -59,10 +59,10 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     for (; i < args.length; i++) {
         const arg = args[i];
         if (arg.startsWith('-') && isKnownOption(arg)) {
-            break; // ここから式
+            break; // Expression starts here
         }
         if (arg === '(' || arg === '!') {
-            break; // ここから式
+            break; // Expression starts here
         }
         paths.push(arg);
     }
@@ -72,7 +72,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         paths.push('.');
     }
 
-    // 3. 評価ツリーの構築
+    // 3. Construct evaluation tree
     let rootPredicate: Predicate;
     try {
         rootPredicate = buildExpressionTree(expressionArgs, sys, proc, writer);
@@ -81,7 +81,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         return 1;
     }
 
-    // 4. トラバーサル実行
+    // 4. Execute traversal
     let exitCode = 0;
     for (const rootPath of paths) {
         try {
@@ -109,7 +109,7 @@ function isKnownOption(arg: string): boolean {
 }
 
 function buildExpressionTree(tokens: string[], sys: SystemAPI, proc: IProcess, writer: BinaryWriter): Predicate {
-    // 省略時アクション: アクションがなければ -print を付与
+    // Default action: append -print if no action is specified
     const hasAction = tokens.some(t => ['-print', '-print0', '-delete', '-exec', '-ls'].includes(t));
     
     const tokenQueue = [...tokens];
@@ -330,7 +330,7 @@ async function walk(
 // --- Helpers ---
 
 /**
- * ✨ -ls 用のフォーマッター
+ * [Helper] Formatter for -ls
  * format: inode blocks perms links user group size date name
  */
 function formatLs(ctx: FindContext): string {

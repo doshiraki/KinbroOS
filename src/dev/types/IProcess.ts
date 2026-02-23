@@ -17,15 +17,15 @@
 /**
  * [Interface: IProcess]
  * 実行中のプロセスが持つコンテキスト情報の定義。
- * 標準入出力ストリームや環境変数へのアクセスを提供する。
+ * Provides access to stdio streams and environment variables.
  */
 
 import { IEnvManager } from "./IEnvManager";
 import { IFileSystem } from "./IFileSystem";
 
 /**
- * ストリームの中身（SourceKind）を定義するEnum
- * メモリ効率と高速化のため数値で管理。
+ * Enum defining stream content (SourceKind)
+ * Managed numerically for memory efficiency and speed.
  */
 
 export const StreamData = {
@@ -41,59 +41,59 @@ export enum TTYMode {
 }
 
 export enum ProcessState {
-    EMBRYO,       // 生成中（PID/PGID確定待ち）
-    RUNNING,      // 実行中
-    SUSPENDED,    // サスペンド（親が子を待っている状態など）
-    ZOMBIE,       // 終了したが、親に看取られていない状態
-    TERMINATED    // 完全に消滅
+    EMBRYO,       // Creating (Waiting for PID/PGID)
+    RUNNING,      // Running
+    SUSPENDED,    // Suspended (Parent waiting for child, etc.)
+    ZOMBIE,       // Terminated but not reaped by parent
+    TERMINATED    // Completely destroyed
 }
 
-// 🌟 1. 追加: シグナル終了を表すエラークラス
+// 1. Added: Error class representing signal termination
 export class SignalError extends Error {
     constructor(public signal: number) {
         super(`Signal: ${signal}`);
     }
 }
 
-// 🌟 1. 汎用リソースインターフェース
+// 1. Generic resource interface
 export interface IResource {
     close(): Promise<void>;
 }
 
 /**
- * 入力ストリームの抽象インターフェース
- * 実装クラス(StdinStream)への依存を断ち切るために使用。
+ * Abstract interface for input streams
+ * Used to decouple from implementation class (StdinStream).
  */
 export interface IStdinStream {
-    /** TTY（端末）に接続されているか？ */
+    /** Connected to TTY (Terminal)? */
     readonly isTTY: boolean;
     
     /** ✨ Update: 文字列ではなく Enum を受け取る */
     setMode(mode: TTYMode): Promise<void>;
 
-    // ✨ 追加: 読み込みを強制中断する
+    // Added: Force interrupt reading
     interrupt(reason?: any): Promise<void>;
 
     /**
      * バイト列として読み込むためのReaderを取得する
-     * (ロック状態ならエラー)
+     * (Error if locked)
      */
     getByteReader(): ReadableStreamDefaultReader<Uint8Array>;
 
     /**
      * 文字列として読み込むためのReaderを取得する
-     * (ロック状態ならエラー)
+     * (Error if locked)
      */
     getStringReader(): ReadableStreamDefaultReader<string>;
 }
 
 /**
- * 出力ストリームの抽象インターフェース
+ * Abstract interface for output streams
  */
 export interface IStdoutStream {
     readonly isTTY: boolean;
 
-    // ✨ 追加: 読み込みを強制中断する
+    // Added: Force interrupt reading
     interrupt(reason?: any): Promise<void>;
     
     /**
@@ -108,37 +108,37 @@ export interface IStdoutStream {
 }
 
 export interface IProcess {
-    /** プロセスID (PID) */
+    /** Process ID (PID) */
     readonly pid: number;
 
     readonly state: ProcessState;
     setState(state: ProcessState):void;
 
-    /** プロセスグループID (PGID) */
+    /** Process Group ID (PGID) */
     readonly pgid: number;
 
-    /** 環境変数のコピー (ReadOnly) */
+    /** Copy of environment variables (ReadOnly) */
     readonly env: IEnvManager;
     
-    /** ファイルシステム (ReadOnly) */
+    /** File System (ReadOnly) */
     readonly fs: IFileSystem;
     
     // --- Web Streams API Standard ---
     
-    /** 標準入力 (Stdin) */
+    /** Standard Input (Stdin) */
     readonly stdin?: IStdinStream;
 
-    /** 標準出力 (Stdout) */
+    /** Standard Output (Stdout) */
     readonly stdout?: IStdoutStream;
 
-    /** 標準エラー出力 (Stderr) */
+    /** Standard Error Output (Stderr) */
     readonly stderr?: IStdoutStream;
 
     wait(): Promise<number>;
 
     /**
-     * プロセスを終了する
-     * @param code 終了コード (0: 正常, >0: エラー)
+     * Terminates the process
+     * @param code Exit code (0: Success, >0: Error)
      */
     exit(code: number): void;
 
@@ -157,8 +157,8 @@ export interface IProcess {
     addCleanupHook(fn: () => void): void;
 
     /**
-     * 🌟 [New] このプロセスが所有するリソース（ファイルストリーム等）を登録する
-     * ここに登録されたものは、exit時に自動的に close() が待機される。
+     * [New] Register resources (file streams, etc.) owned by this process
+     * Registered resources are automatically closed during exit.
      */
     addResource(res: IResource): void;
 }

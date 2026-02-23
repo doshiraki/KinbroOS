@@ -16,8 +16,8 @@
 
 /**
  * [Definition-Driven Parser 2.1]
- * - SubCommand対応
- * - Recursive Help Detection (再帰的ヘルプ検知)
+ * - Sub-command support
+ * - Recursive Help Detection
  */
 
 export interface OptionDef {
@@ -48,7 +48,7 @@ export class CommandParser {
         this.objDef = { ...objDef };
         this.objDef.options = this.objDef.options || [];
 
-        // 全コマンド共通 --help, -h
+        // Global help flags: --help, -h
         if (!this.objDef.options.find(d => d.long === 'help')) {
             this.objDef.options.push({ short: 'h', long: 'help', desc: 'display this help and exit' });
         }
@@ -72,13 +72,13 @@ export class CommandParser {
                 continue;
             }
 
-            // サブコマンド判定
+            // Sub-command detection
             if (this.objDef.subCommands && this.objDef.subCommands[strArg]) {
                 this.subCommandName = strArg;
                 const subDef = this.objDef.subCommands[strArg];
                 const remainingArgs = arrArgs.slice(i + 1);
                 this.subParser = new CommandParser(remainingArgs, subDef);
-                return; // 委譲して終了
+                return; // Delegate and exit
             }
 
             this.arrPositionals.push(strArg);
@@ -159,7 +159,7 @@ export class CommandParser {
     }
 
     public getHelp(): string {
-        // ✨ 子がヘルプを要求しているなら、子のヘルプを返す (git commit --help)
+        // If child requests help, return child help (e.g., git commit --help)
         if (this.subParser && this.subParser.isHelpRequested) {
             return this.subParser.getHelp();
         }
@@ -212,7 +212,7 @@ export class CommandParser {
     public get args(): string[] { return this.arrPositionals; }
     public get isSubCommandSelected(): boolean { return !!this.subParser; }
     
-    // ✨ 修正: 自身がヘルプ要求を持っているか、または子がヘルプ要求を持っているか
+    // [Fix] Check if either self or child has a help request
     public get isHelpRequested(): boolean { 
         return this.has('h', 'help') || (this.subParser?.isHelpRequested ?? false); 
     }

@@ -26,7 +26,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         try { await writer.write(str); } catch (e) { throw new Error("EPIPE"); }
     };
 
-    // 1. 引数定義 (grep.txt に基づき完全網羅)
+    // 1. Argument definitions (fully covered based on grep.txt)
     const parser = new CommandParser(args, {
         name: 'grep',
         usage: '[OPTION]... PATTERNS [FILE]...',
@@ -120,7 +120,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         return new RegExp(`^${pattern}$`);
     };
 
-    // 2. パターン構築
+    // 2. Pattern construction
     let patterns: string[] = [];
     
     // -e PATTERN
@@ -131,7 +131,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     for (const f of patternFiles) {
         try {
             const content = await proc.fs.readFile(f, 'utf8') as string;
-            // 空行は全てにマッチしてしまうので注意が必要だが、GNU grepは空行もパターンとする
+            // Note: empty lines match everything, but GNU grep treats them as patterns.
             patterns.push(...content.split('\n').filter(l => l.length > 0)); 
         } catch (e: any) {
             if (!parser.has('s')) await stderr.write(`grep: ${f}: No such file or directory\r\n`);
@@ -141,7 +141,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
 
     let targetArgs = parser.args;
     if (patterns.length === 0 && targetArgs.length > 0) {
-        // オプションでパターン指定がない場合、最初の引数をパターンとする
+        // If no pattern is specified in options, treat the first argument as the pattern.
         patterns.push(targetArgs[0]);
         targetArgs = targetArgs.slice(1);
     } else if (patterns.length === 0) {
@@ -149,7 +149,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         await stderr.close(); return 2;
     }
 
-    // パターン結合
+    // Pattern concatenation
     let combinedPattern = patterns.join('|');
     if (parser.has('F')) combinedPattern = patterns.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
     if (parser.has('w')) combinedPattern = patterns.map(p => `\\b${p}\\b`).join('|');
@@ -164,7 +164,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         await stderr.close(); return 2;
     }
 
-    // 3. 設定値の解決
+    // 3. Resolution of configuration values
     if (targetArgs.length === 0) targetArgs = ['-'];
 
     const opts = {
@@ -192,21 +192,21 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         groupSep: getLastArg('group-separator') || (parser.has('no-group-separator') ? null : '--'),
     };
     
-    // カラー設定 (autoの場合TTY判定)
+    // Color settings (TTY check if auto)
     const useColor = (opts.color === 'always') || (opts.color === 'auto' && (proc.stdout?.isTTY ?? false));
     
-    // Glob設定
+    // Glob settings
     const includes = getArgValues('include').map(globToRegex);
     const excludes = getArgValues('exclude').map(globToRegex);
     const excludeDirs = getArgValues('exclude-dir').map(globToRegex);
-    // exclude-from は実装省略 (ファイル読み込みが必要なため)
+    // exclude-from implementation is omitted (requires file reading)
 
-    // ファイル名表示判定
+    // Logic to determine if filename should be displayed
     let showFilename = parser.has('H');
     if (parser.has('h')) showFilename = false;
     else if (!showFilename && (opts.recursive || targetArgs.length > 1)) showFilename = true;
 
-    // 4. ファイル探索 & 処理キュー
+    // 4. File traversal \& processing queue
     let totalMatches = 0;
     const queue = [...targetArgs];
     
@@ -214,7 +214,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         while (queue.length > 0) {
             const path = queue.shift()!;
             
-            // 除外チェック (ディレクトリかファイルかわからない段階だが、名前でチェック)
+            // Exclusion check (checked by name before identifying as file or directory)
             const basename = path.split('/').pop() || path;
             if (path !== '-' && excludes.some(r => r.test(basename))) continue;
             
@@ -246,16 +246,16 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
                 }
                 continue;
             } else {
-                // ファイルの場合、Includeチェック
+                // For files, perform include check
                 if (path !== '-' && includes.length > 0 && !includes.some(r => r.test(basename))) continue;
             }
 
-            // --- ファイル処理実行 ---
+            // --- Execute file processing ---
             const displayPath = (path === '-' && opts.label) ? opts.label : path;
             const matches = await processFile(path, displayPath, regexp, opts, showFilename, useColor, proc, safeWrite);
             if (matches > 0) totalMatches += matches;
             
-            // -q でマッチしたら即終了
+            // If -q matches, terminate immediately
             if (opts.quiet && totalMatches > 0) return 0;
         }
     } catch (e: any) {
@@ -268,7 +268,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     return totalMatches > 0 ? 0 : 1;
 }
 
-// 5. ファイル処理コアロジック (ストリーミング + コンテキスト)
+// 5. File processing core logic (streaming + context)
 async function processFile(
     realPath: string,
     displayPath: string,
@@ -286,18 +286,18 @@ async function processFile(
         if (!proc.stdin) return 0;
         lineReader = createLineReader(proc.stdin.getStringReader(), opts.nullData ? '\0' : '\n');
     } else {
-        // Binary File Check (簡易: 先頭バイト等で判定すべきだが、今回は拡張子やオプションに従う)
-        // opts.binaryFiles === 'without-match' (-I) ならスキップすべきだが、読み込まないとわからない
-        // ここではテキストとして読み込む
+        // Binary File Check (Simple: should check leading bytes, but relies on extension/options for now)
+        // If opts.binaryFiles is "without-match" (-I), it should be skipped, but requires reading to confirm.
+        // Treating as text for now
         try {
             const content = await proc.fs.readFile(realPath, 'utf8') as string;
-            // メモリ効率は悪いが簡易実装としてsplit
+            // Simple implementation using split (memory-inefficient)
             const sep = opts.nullData ? '\0' : '\n';
             lineReader = (async function*() { 
                 for(const l of content.split(sep)) yield l; 
             })();
         } catch {
-            return 0; // エラーはメインループで処理済み想定
+            return 0; // Assumes errors are handled in the main loop
         }
     }
 
@@ -313,7 +313,7 @@ async function processFile(
     let lastMatchLineNum = -1;
 
     for await (let line of lineReader) {
-        // 末尾のCR除去 (-U指定なければ)
+        // Remove trailing CR (if -U is not specified)
         if (!opts.nullData && !opts.binary && line.endsWith('\r')) line = line.slice(0, -1);
         
         lineNum++;
@@ -327,14 +327,14 @@ async function processFile(
         if (isHit) {
             matchCount++;
             
-            // 即時終了系
-            if (opts.quiet) return 1; // マッチ数1以上確定
-            if (opts.filesWithoutMatch) return 0; // マッチした時点で除外
+            // Early exit conditions
+            if (opts.quiet) return 1; // Confirmed at least one match
+            if (opts.filesWithoutMatch) return 0; // Exclude upon matching
             if (opts.filesWithMatch) {
                 await write(`${displayPath}${opts.nullOutput ? '\0' : '\n'}`);
-                return 1; // これ以上読む必要なし
+                return 1; // No further reading required
             }
-            if (opts.count) continue; // カウントのみ
+            if (opts.count) continue; // Count only
 
             // Group Separator
             if (opts.groupSep && lastMatchLineNum !== -1 && lineNum > lastMatchLineNum + 1 && (opts.ctxBefore > 0 || opts.ctxAfter > 0)) {
@@ -393,7 +393,7 @@ async function processFile(
     return matchCount;
 }
 
-// 6. 出力フォーマッタ
+// 6. Output formatter
 async function printLine(
     line: string,
     lineNum: number,
@@ -435,7 +435,7 @@ async function printLine(
     await write(content + '\n');
 }
 
-// 7. ストリーミングリーダー
+// 7. Streaming reader
 async function* createLineReader(reader: ReadableStreamDefaultReader<string>, delimiter: string) {
     let buffer = '';
     try {

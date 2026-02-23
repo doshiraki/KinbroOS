@@ -45,14 +45,14 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     const strMode = arrPositionals[0]; // e.g., "+x", "755"
     const arrFiles = arrPositionals.slice(1);
     
-    // モード解析 (簡易版: +x/-x のみ対応、数値はZenFSに任せる)
+    // Mode analysis (Simplified: only supports +x/-x, delegates octal to ZenFS)
     let fnUpdateMode: ((current: number) => number) | null = null;
     if (strMode === '+x') {
-        fnUpdateMode = (m) => m | 0o111; // User, Group, Others に実行権限付与
+        fnUpdateMode = (m) => m | 0o111; // Grant execute permission to User, Group, Others
     } else if (strMode === '-x') {
-        fnUpdateMode = (m) => m & ~0o111; // 実行権限剥奪
+        fnUpdateMode = (m) => m & ~0o111; // Revoke execute permission
     } else if (/^[0-7]+$/.test(strMode)) {
-        // 8進数指定 (例: 755)
+        // Octal specification (e.g., 755)
         const valOctal = parseInt(strMode, 8);
         fnUpdateMode = () => valOctal;
     } else {
@@ -71,15 +71,15 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
                 const stat = await proc.fs.getStat(strFile);
                 const valNewMode = fnUpdateMode(stat.mode);
                 
-                // ZenFSのchmodを呼び出し
-                // ※ FileSystem.ts に chmod がない場合は追加が必要だが、
-                // ZenFS (fs.promises) は chmod を持っている。
-                // IFileSystem インターフェース経由で呼べる前提とする。
-                // もし IFileSystem に chmod がなければ、proc.fs.fs.chmod (生のfs) を叩く等の拡張が必要。
-                // ここでは IFileSystem に chmod がある体で書くか、anyキャストで逃げる。
+                // Call ZenFS chmod
+                // * If FileSystem.ts lacks chmod, it needs to be added, but
+                // ZenFS (fs.promises) already has chmod.
+                // Assuming it can be called via the IFileSystem interface.
+                // If IFileSystem lacks chmod, expansion like calling proc.fs.fs.chmod (raw fs) is needed.
+                // Writing here assuming IFileSystem has chmod, or escaping with an any cast.
                 
-                // 【重要】FileSystem.ts に chmod を追加することを推奨！
-                // 一旦、proc.fs が拡張されている前提で記述。
+                // [IMPORTANT] Highly recommended to add chmod to FileSystem.ts!
+                // For now, written on the premise that proc.fs is extended.
                 await proc.fs.chmod(strFile, valNewMode);
 
             } catch (e: any) {

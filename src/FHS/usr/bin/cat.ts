@@ -17,15 +17,15 @@
 import { SystemAPI } from '../../../dev/types/SystemAPI';
 import { IProcess } from '../../../dev/types/IProcess';
 import { CommandParser } from '../lib/CommandParser';
-import { BinaryReader, BinaryWriter } from '../lib/StreamUtils'; // ✨ BinaryReaderを追加
+import { BinaryReader, BinaryWriter } from '../lib/StreamUtils'; // Added BinaryReader
 
-// 行番号などの状態（複数ファイル間で継続する）
+// State (persists across multiple files, e.g., line numbers)
 interface CatState {
     cntLine: number;
     isLastEmpty: boolean;
 }
 
-// 表示オプション
+// Display options
 interface CatOptions {
     showNonPrinting: boolean;
     showEnds: boolean;
@@ -70,7 +70,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         return 0;
     }
 
-    // オプション解決
+    // Option resolution
     const opts: CatOptions = {
         showNonPrinting: parser.has('v', 'show-nonprinting') || parser.has('A', 'show-all') || parser.has('e') || parser.has('t'),
         showEnds: parser.has('E', 'show-ends') || parser.has('A', 'show-all') || parser.has('e'),
@@ -80,10 +80,10 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         numberAll: parser.has('n', 'number') && !parser.has('b', 'number-nonblank')
     };
 
-    // テキスト処理が必要か判定
+    // Determine if text processing is required
     const isTextMode = Object.values(opts).some(v => v);
     
-    // 引数がなければ stdin (-) を対象にする
+    // Default to stdin (-) if no arguments provided
     const arrTargets = parser.args.length > 0 ? parser.args : ['-'];
 
     const state: CatState = { cntLine: 1, isLastEmpty: false };
@@ -104,12 +104,12 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
 
                 try {
                     if (isTextMode) {
-                        // Text Mode: ストリームをバッファリングして行ごとに処理
+                        // Text Mode: Buffer the stream and process line by line
                         let buffer = '';
                         while (true) {
                             const { value, done } = await reader.readString();
                             if (done) {
-                                // 残ったバッファを処理（改行なしの末尾）
+                                // Process remaining buffer (EOF without newline)
                                 if (buffer.length > 0) {
                                     await printLine(writer, buffer, state, opts, '');
                                 }
@@ -118,7 +118,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
                             
                             buffer += value;
                             let idx;
-                            // 改行が見つかる限り切り出して処理
+                            // Extract and process as long as newlines are found
                             while ((idx = buffer.indexOf('\n')) !== -1) {
                                 const line = buffer.slice(0, idx);
                                 buffer = buffer.slice(idx + 1);
@@ -126,7 +126,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
                             }
                         }
                     } else {
-                        // Binary Fast Path: 読み込んだバイトを即座に流す (Zero Copy)
+                        // Binary Fast Path: Flush read bytes immediately (Zero Copy)
                         while (true) {
                             const { value, done } = await reader.read();
                             if (done) break;
@@ -144,16 +144,16 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
             } else {
                 try {
                     if (isTextMode) {
-                        // Text Mode: ファイル全体を読んで行分割
+                        // Text Mode: Read entire file and split by lines
                         const strContent = await proc.fs.readFile(target, "utf8") as string;
                         const arrLines = strContent.split('\n');
 
                         for (let i = 0; i < arrLines.length; i++) {
                             const line = arrLines[i];
-                            // splitの仕様上、ファイル末尾が\nの場合、最後に空文字が入るので無視
+                            // Due to split spec, ignore the last empty string if file ends with newline
                             if (i === arrLines.length - 1 && line === '' && strContent.endsWith('\n')) break;
                             
-                            // 末尾行以外は \n をつける
+                            // Append newline except for the last line
                             const eol = (i === arrLines.length - 1 && !strContent.endsWith('\n')) ? '' : '\n';
                             await printLine(writer, line, state, opts, eol);
                         }
@@ -176,7 +176,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
 }
 
 /**
- * [Helper] 1行分のテキスト処理と出力
+ * [Helper] Text processing and output for a single line
  */
 async function printLine(
     writer: BinaryWriter, 
@@ -187,7 +187,7 @@ async function printLine(
 ) {
     const isEmpty = line.length === 0;
 
-    // -s: 連続する空行を圧縮
+    // -s: Squeeze consecutive blank lines
     if (opts.squeezeBlank) {
         if (state.isLastEmpty && isEmpty) return;
         state.isLastEmpty = isEmpty;
@@ -195,10 +195,10 @@ async function printLine(
         state.isLastEmpty = false;
     }
 
-    // -T: タブ可視化
+    // -T: Display tabs
     if (opts.showTabs) line = line.replace(/\t/g, '^I');
 
-    // -v: 制御文字可視化 (簡易版)
+    // -v: Display control characters (Simplified)
     if (opts.showNonPrinting) {
          line = line.replace(/[\x00-\x08\x0B-\x1F\x7F]/g, (c) => {
             const code = c.charCodeAt(0);
@@ -206,7 +206,7 @@ async function printLine(
         });
     }
 
-    // -n / -b: 行番号
+    // -n / -b: Line numbers
     let prefix = '';
     if (opts.numberNonBlank) {
         if (!isEmpty) prefix = String(state.cntLine++).padStart(6, ' ') + '  ';
@@ -214,7 +214,7 @@ async function printLine(
         prefix = String(state.cntLine++).padStart(6, ' ') + '  ';
     }
 
-    // -E: 行末ドル記号
+    // -E: End of line dollar sign
     const suffix = opts.showEnds ? '$' : '';
 
     await writer.writeString(prefix + line + suffix + eol);

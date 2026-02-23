@@ -42,13 +42,13 @@ interface FileEntry {
     stats: Stats;
     isDir: boolean;
     isExe: boolean;
-    isLink: boolean; // OPFSでは常にfalseだが枠として確保
+    isLink: boolean; // Always false in OPFS, but reserved as a placeholder
 }
 
 /**
  * [Command: ls]
- * ディレクトリの内容をリスト表示する。
- * GNU coreutils 準拠 (Long format, Recursive, Sorting, Colors)
+ * List directory contents.
+ * GNU coreutils compliant (Long format, Recursive, Sorting, Colors)
  */
 export async function main(args: string[], sys: SystemAPI, proc: IProcess): Promise<number> {
     const parser = new CommandParser(args, {
@@ -69,7 +69,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
             { short: 't', desc: 'sort by modification time, newest first' },
             { short: 'U', desc: 'do not sort; list entries in directory order' },
             { short: '1', desc: 'list one file per line' },
-            { long: 'color', desc: 'colorize the output', hasArg: false }, // 引数なしまたはautoと仮定
+            { long: 'color', desc: 'colorize the output', hasArg: false }, // Assume no argument or "auto"
             { long: 'help', desc: 'display this help and exit' }
         ]
     });
@@ -97,13 +97,13 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         inode: parser.has('i', 'inode')
     };
 
-    // 引数がなければカレントディレクトリ
+    // Default to current directory if no arguments provided
     const targets = parser.args.length > 0 ? parser.args : ['.'];
     
-    // 終了コード
+    // Exit code
     let exitCode = 0;
 
-    // 複数ターゲットがある場合、ディレクトリ名のヘッダを表示するかどうかのフラグ
+    // Flag to determine whether to display directory headers for multiple targets
     const printDirHeader = targets.length > 1 || opts.recursive;
 
     try {
@@ -111,25 +111,25 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
             const target = targets[i];
             
             try {
-                // ターゲット自体の情報を取得
-                // ※リンク対応するなら lstat だが、IFileSystem 仕様により getStat (stat) を使う
+                // Get information for the target itself
+                // Note: Use getStat (stat) due to IFileSystem spec, though lstat would be used for symlinks
                 const stat = await proc.fs.getStat(target);
                 const isDir = stat.isDirectory();
 
                 if (isDir && !opts.directory) {
-                    // ディレクトリの中身を表示
+                    // Display directory contents
                     if (printDirHeader) {
-                        // 2つ目以降、または再帰の途中なら改行を入れる
+                        // Insert newline for second target onwards or during recursion
                         if (i > 0) await writer.writeString('\n');
                         await writer.writeString(`${target}:\n`);
                     }
                     await listDirectory(target, writer, proc, opts);
                 } else {
-                    // ファイル自体 (または -d 指定時のディレクトリ) を表示
-                    // ファイルリストとして整形して表示するために Entry 化
-                    const entry = await createEntry(proc, '.', target); // 親はダミー
+                    // Display the file itself (or directory if -d is specified)
+                    // Convert to Entry to format and display as a file list
+                    const entry = await createEntry(proc, ".", target); // Parent is a dummy
                     if (entry) {
-                        // 単体表示用ロジック (フォーマットは共有)
+                        // Logic for single item display (shared format)
                         await printEntries([entry], writer, opts);
                     }
                 }
@@ -149,7 +149,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
 // --- Logic ---
 
 /**
- * ディレクトリの中身をリストアップして表示する (再帰対応)
+ * Lists and displays directory contents (recursive support)
  */
 async function listDirectory(pathDir: string, writer: BinaryWriter, proc: IProcess, opts: LsOptions) {
     let names: string[] = [];
@@ -160,10 +160,10 @@ async function listDirectory(pathDir: string, writer: BinaryWriter, proc: IProce
         return;
     }
 
-    // エントリー情報収集
+    // Collect entry information
     const entries: FileEntry[] = [];
     for (const name of names) {
-        // -a / -A フィルタリング
+        // -a / -A filtering
         if (name.startsWith('.')) {
             if (!opts.all && !opts.almostAll) continue;
             if (opts.almostAll && (name === '.' || name === '..')) continue;
@@ -173,13 +173,13 @@ async function listDirectory(pathDir: string, writer: BinaryWriter, proc: IProce
         if (entry) entries.push(entry);
     }
 
-    // ソート
+    // Sorting
     sortEntries(entries, opts);
 
-    // 表示
+    // Display
     await printEntries(entries, writer, opts);
 
-    // 再帰処理 (-R)
+    // Recursive processing (-R)
     if (opts.recursive) {
         for (const entry of entries) {
             if (entry.isDir && entry.name !== '.' && entry.name !== '..') {
@@ -199,11 +199,11 @@ async function createEntry(proc: IProcess, parentDir: string, name: string): Pro
             path: fullPath,
             stats: stat,
             isDir: stat.isDirectory(),
-            isExe: (stat.mode & 0o111) !== 0 && !stat.isDirectory(), // 実行権限チェック(簡易)
+            isExe: (stat.mode & 0o111) !== 0 && !stat.isDirectory(), // Executable check (simple)
             isLink: stat.isSymbolicLink()
         };
     } catch {
-        return null; // 消えたファイルなどは無視
+        return null; // Ignore files that no longer exist
     }
 }
 
@@ -213,8 +213,8 @@ function sortEntries(entries: FileEntry[], opts: LsOptions) {
     entries.sort((a, b) => {
         let cmp = 0;
         switch (opts.sort) {
-            case 'size': cmp = b.stats.size - a.stats.size; break; // 大きい順
-            case 'time': cmp = b.stats.mtimeMs - a.stats.mtimeMs; break; // 新しい順
+            case 'size': cmp = b.stats.size - a.stats.size; break; // Largest first
+            case 'time': cmp = b.stats.mtimeMs - a.stats.mtimeMs; break; // Newest first
             case 'name': cmp = a.name.localeCompare(b.name); break;
         }
         return opts.reverse ? -cmp : cmp;
@@ -226,8 +226,8 @@ async function printEntries(entries: FileEntry[], writer: BinaryWriter, opts: Ls
 
     if (opts.long) {
         // Long Format Output (-l)
-        const totalBlocks = entries.reduce((acc, e) => acc + Math.ceil(e.stats.size / 512), 0); // 簡易ブロック計算
-        if (entries.length > 0 && !opts.directory) { // -d の時は total を出さないのが一般的
+        const totalBlocks = entries.reduce((acc, e) => acc + Math.ceil(e.stats.size / 512), 0); // Simple block calculation
+        if (entries.length > 0 && !opts.directory) { // Generally, "total" is not shown with -d
              await writer.writeString(`total ${totalBlocks}\n`);
         }
 
@@ -237,7 +237,7 @@ async function printEntries(entries: FileEntry[], writer: BinaryWriter, opts: Ls
             await writer.writeString(`${meta} ${name}\n`);
         }
     } else {
-        // Short Format (1行1つ簡易版。本来はカラム表示すべきだが、TTY幅取得が複雑なので今回はシンプルに)
+        // Short Format (Single entry per line. Column display is ideal, but simplified for now)
         for (const e of entries) {
             const name = formatName(e, opts);
             await writer.writeString(`${name}\n`);
@@ -280,7 +280,7 @@ function formatLongMeta(e: FileEntry, opts: LsOptions): string {
     const perm = (mode: number) => {
         return (mode & 4 ? 'r' : '-') + (mode & 2 ? 'w' : '-') + (mode & 1 ? 'x' : '-');
     };
-    // ZenFSのmodeは標準的なUnixモードビットを持つと仮定
+    // Assume ZenFS mode uses standard Unix mode bits
     const u = perm((s.mode >> 6) & 7);
     const g = perm((s.mode >> 3) & 7);
     const o = perm(s.mode & 7);
@@ -289,7 +289,7 @@ function formatLongMeta(e: FileEntry, opts: LsOptions): string {
     // Links (Hardcoded 1 or 2 for dirs if not available)
     const nlink = (s as any).nlink || (e.isDir ? 2 : 1);
 
-    // User/Group (ZenFSではIDしか取れない場合が多いので、geek固定またはID表示)
+    // User/Group (Default to "geek" or IDs as ZenFS often only provides IDs)
     const user = 'geek'; 
     const group = 'geek';
 
@@ -302,10 +302,10 @@ function formatLongMeta(e: FileEntry, opts: LsOptions): string {
     // Time
     const date = new Date(s.mtimeMs);
     const strDate = date.toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
-    // ※ 本来は半年以上前なら年を表示するロジックなどがある
+    // Note: Standard ls shows the year if the file is more than six months old
 
-    // Padding (本来は全エントリ走査して最大幅に合わせるべきだが、簡易的に固定幅orパディングなし)
-    // ここではタブ区切りの代わりにスペースで整形
+    // Padding (Should ideally match max width of all entries, but simplified for now)
+    // Formatting with spaces instead of tabs here
     return `${strMode} ${String(nlink).padStart(2)} ${user} ${group} ${strSize.padStart(opts.humanReadable?5:8)} ${strDate}`;
 }
 

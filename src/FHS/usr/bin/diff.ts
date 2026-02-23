@@ -26,10 +26,10 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         usage: '[OPTION]... FILES',
         desc: 'compare files line by line',
         options: [
-            // 🌟 User Feedback: -u is flag, -U is arg
+            // [User Feedback] -u is flag, -U is arg
             { short: 'u', long: 'unified', desc: 'output unified context (default 3 lines)' }, // hasArg: false
             { short: 'U', desc: 'output NUM lines of unified context', hasArg: true },
-            // 🌟 New: 表示ラベルの上書きオプション (Git連携用)
+            // [New] Option to overwrite display label (for Git integration)
             { long: 'label', hasArg: true, desc: 'use LABEL instead of file name (can be repeated)' },
             
             { short: 'q', long: 'brief', desc: 'report only when files differ' },
@@ -59,7 +59,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
     const file1Path = parser.args[0];
     const file2Path = parser.args[1];
 
-    // 🌟 Labelの取得 (指定がなければファイルパスを使う)
+    // [Update] Get label (use file path if not specified)
     const labels = parser.get('label');
     let label1 = file1Path;
     let label2 = file2Path;
@@ -69,7 +69,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         if (labels.length > 1) label2 = labels[1];
     } else if (typeof labels === 'string') {
         label1 = labels;
-        // 2つ目はデフォルトのまま
+        // Keep the second one as default
     }
 
 
@@ -86,7 +86,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         const ignoreWhitespace = parser.has('w', 'ignore-all-space') || parser.has('b', 'ignore-space-change');
         const useColor = parser.has(undefined, 'color') && !parser.has(undefined, 'no-color');
         
-        // 🌟 Fix: 型指定を削除 (ライブラリの型定義バージョン差異を吸収)
+        // [Fix] Remove type specification (absorbs library type definition version differences)
         const diffOpts = {
             ignoreCase: ignoreCase,
             ignoreWhitespace: ignoreWhitespace
@@ -94,7 +94,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
 
         // 1. Brief Check (-q)
         if (isBrief) {
-            // 🌟 Fix: undefinedガードと型キャスト
+            // [Fix] Undefined guard and type casting
             const changes = Diff.diffLines(content1, content2, diffOpts) || [];
             const hasDiff = changes.some((part: any) => part.added || part.removed);
             
@@ -111,13 +111,13 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         let format = 'normal';
         let context = 3;
 
-        // 🌟 Logic Update: -U num を優先チェック
+        // [Update] Priority check for -U num
         if (parser.has('U')) {
             format = 'unified';
             const val = parser.get('U');
             if (val && typeof val === 'string') context = parseInt(val) || 3;
         }
-        // -u (flag) チェック ( -U が指定されていなければ context=3 のまま unified になる)
+        // -u (flag) check (stays context=3 if -U is not specified)
         else if (parser.has('u', 'unified')) {
             format = 'unified';
         }
@@ -128,7 +128,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
         }
 
         if (format === 'unified') {
-            // 🌟 Fix: patchのundefinedガード
+            // [Fix] Undefined guard for patch
             const patch = Diff.createTwoFilesPatch(
                 label1, label2, content1, content2, 
                 '', '', 
@@ -147,7 +147,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
                     await writer.writeString(`${line}\n`);
                 }
             }
-            // 🌟 Fix: changesガード
+            // [Fix] Changes guard
             const changes = Diff.diffLines(content1, content2, diffOpts) || [];
             return changes.some((p: any) => p.added || p.removed) ? 1 : 0;
 
@@ -164,7 +164,7 @@ export async function main(args: string[], sys: SystemAPI, proc: IProcess): Prom
             let line2 = 1;
 
             for (let i = 0; i < changes.length; i++) {
-                const change: any = changes[i]; // 🌟 Fix: anyキャスト
+                const change: any = changes[i]; // [Fix] any cast
                 const count = change.count || 0;
 
                 if (!change.added && !change.removed) {

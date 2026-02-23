@@ -15,7 +15,7 @@
  */
 
 import {IFileSystem} from '../../../dev/types/IFileSystem'
-// 1. 意味の明確化 (Enum)
+// 1. Definition (Enum) for clarity
 export enum TransferMode {
     Put = 'PUT', // Local(Host) -> Remote(ZenFS)
     Get = 'GET'  // Remote(ZenFS) -> Local(Host)
@@ -30,7 +30,7 @@ export class ZenTransfer {
 
     /**
      * [zenput] Host -> ZenFS
-     * ブラウザのファイルピッカーを開き、選択されたファイルをZenFSに保存する
+     * Open browser file picker and save selected file to ZenFS
      */
     public async put(): Promise<string> {
         return new Promise((resolve, reject) => {
@@ -67,7 +67,7 @@ export class ZenTransfer {
 
     /**
      * [zenget] ZenFS -> Host
-     * ZenFS上のファイルを読み込み、ブラウザのダウンロード機能を発火させる
+     * Read file from ZenFS and trigger browser download
      */
     public async get(srcPath: string): Promise<string> {
         if (!srcPath) {
@@ -85,21 +85,21 @@ export class ZenTransfer {
             // バイナリとして読み込む
             const dataContent = await this.objFs.readFile(srcPath, 'binary');
             
-            // [修正] TypeScriptの型不整合を回避 [cite: 700-701]
-            // Uint8Array<ArrayBufferLike> は厳密には BlobPart と互換性がないと判定されるため、
-            // any でキャストしてコンパイラを納得させる美学。
+            // [Fix] Avoid TypeScript type mismatch [cite: 700-701]
+            // Uint8Array<ArrayBufferLike> is not strictly compatible with BlobPart,
+            // so casting to any to satisfy the compiler.
             const blobData = new Blob([dataContent as any]);
             
             const urlDownload = URL.createObjectURL(blobData);
 
-            // ファイル名抽出 (簡易版)
+            // Filename extraction (simplified version)
             const strFileName = srcPath.split('/').pop() || 'download.bin';
 
-            // ダウンロードリンクを生成してクリック
+            // Generate download link and trigger click
             const domLink = document.createElement('a');
             domLink.href = urlDownload;
             domLink.download = strFileName;
-            document.body.appendChild(domLink); // Firefox対応のため一時的に追加
+            document.body.appendChild(domLink); // Temporarily add for Firefox compatibility
             domLink.click();
             document.body.removeChild(domLink);
             

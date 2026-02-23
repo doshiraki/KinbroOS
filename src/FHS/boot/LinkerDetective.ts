@@ -57,12 +57,12 @@ export class LinkerDetective {
             setProcessed.add(pathCurrent);
             console.log(pathCurrent);
 
-            // ファイル読み込み (テキストとして取得)
+            // Read file (acquired as text)
             // * Assumes FileSystem.ts readFile returns a string
-            //   もし Uint8Array なら TextDecoder で変換が必要だよ
+            //   If Uint8Array, conversion via TextDecoder is required
             let srcContent = await fs.readFile(pathCurrent);
             if (typeof srcContent !== 'string') {
-                console.log("array → string");
+                console.log("array -> string");
                 srcContent = new TextDecoder().decode(srcContent);
             }
 
@@ -90,7 +90,7 @@ export class LinkerDetective {
             
                 // Path resolution
                 const absPath = fs.resolvePath(relPath, dirCurrent);
-                dependencies.push(absPath); // 後で再帰処理するためにメモ
+                dependencies.push(absPath); // Memo for later recursive processing
 
                 // Generate rewritten code
                 const routerPath = `${LinkerDetective.routerUrl}#path=${encodeURIComponent(absPath)}`;
